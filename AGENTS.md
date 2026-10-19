@@ -27,6 +27,21 @@ dell'utente, nella stessa richiesta.
 - **NEVER install, launch, remove or reboot an app on a TV without the user's explicit
   authorisation in the same request** ("installa su TV-Cucina"). "Prepare the build" alone means
   STOP at the IPK: do not install.
+- **The standing protocol for a change (user, 2026-10-19): build and download, then STOP.**
+  After a patch: commit → push to `main` → let CI build → **download the IPK only**, then reply with
+  the IPK's identity (path, app id, version, SHA256) saying it is READY and **end the message**. Do
+  NOT install, do NOT launch, and do not start an automatic install. The user answers with
+  "installa" (or equivalent) in a later message, and only then run `ares-install` + `ares-launch` on
+  the TV they name. A watcher that installs by itself is exactly what this rule forbids — the helper
+  is `/tmp/opencode/wait-ipk.sh`, which downloads and stops.
+- **WAIT for the build to finish and monitor it (user, 2026-10-19).** Do not hand back while CI is
+  running: poll the run in the foreground (progress lines every ~30 s) until it is `completed`, then
+  read the `armv7 cross-build` job's own conclusion, download the artifact and report. A CI run whose
+  conclusion is `failure` because of the host unit-test job is the expected shape — check the ARM
+  job, never the run's overall conclusion, before saying anything about the build.
+- **A `pkill -f` must not name the script whose process is being killed in the same command line.**
+  Both the pattern and the path would match the killing shell, which then kills itself (it happened
+  twice). Kill in its own command, or use a pattern that cannot match the caller.
 - **Install on the TV the user NAMED, and never on both** unless both were named. Always state at
   the end which TV was changed and which was not.
 - Before an install: the IPK must exist, the tests must be green, and the report must carry the
@@ -59,9 +74,10 @@ dell'utente, nella stessa richiesta.
   `curl -sSL -H "Authorization: Bearer $TOKEN" -o a.zip
   https://api.github.com/repos/wes1993/plx-native/actions/artifacts/<id>/zip`, then unzip.
 - **The loop**: change → commit → `git push origin HEAD:main` → watch the `CI` run → download the
-  `plxnative-<sha>` artifact → `ares-install --device TV-Cucina <ipk>` → `ares-launch`. The host
-  unit-test job goes red on `fixture_preflight` until the replay fixtures are re-recorded (macOS
-  simulator); the `armv7 cross-build` job is independent and still produces the ipk.
+  `plxnative-<sha>` artifact → **report "IPK pronto" and STOP**. `ares-install --device <named TV>
+  <ipk>` + `ares-launch` happen only after the user's explicit authorisation in a later message.
+  The host unit-test job goes red on `fixture_preflight` until the replay fixtures are re-recorded
+  (macOS simulator); the `armv7 cross-build` job is independent and still produces the ipk.
 
 (The user's TV rules also named the app id `com.wes93.fastplexwebos` and
 `/workspace/fastplex-webos` artifacts. Those clauses belong to another project and are
