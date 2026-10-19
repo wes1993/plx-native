@@ -5824,10 +5824,30 @@ impl ScrobbleWork {
             stop.finish();
         }
         if !self.transcode_session.is_empty() {
-            let ok = self
+            let stopped = self
                 .client
                 .is_some_and(|c| c.transcode_stop(&self.transcode_session));
-            plx_base::eventlog::log(&format!("transcode stopped ok={}", ok as i32));
+            // **A bare stop is NOT enough to release the session.** PMS's stop worker erases the
+            // physical map entry before it reconciles the Streaming Resource, and after an MDE the
+            // stop itself answers 404 (docs/pms-api.md M6) — either way the resource outlives the
+            // encoder. On a share that allows ONE playback at a time that is not a leak, it is a
+            // LOCK-OUT: the next play is refused until the resource is gone, so the exit path must
+            // close it, not merely ask. `transcode_resource_reconciled` is the exact closer
+            // (`/status/sessions/close`, 404 = already closed = success) and the ABR replacement
+            // path already uses it through `ENCODER_CLEANUP`; this is the same call on the way out.
+            // It is idempotent, so it runs whenever the stop did not come back 2xx.
+            let closed = if stopped {
+                true
+            } else {
+                self.client
+                    .and_then(|c| c.transcode_resource_reconciled(&self.transcode_session))
+                    == Some(true)
+            };
+            plx_base::eventlog::log(&format!(
+                "transcode stopped ok={} resource_closed={}",
+                stopped as i32,
+                closed as i32
+            ));
         }
     }
 }
@@ -7087,9 +7107,17 @@ fn mde_verdict(mc: &plx_plex::plex::MediaContainer) -> Option<MdeVerdict> {
     {
         Some(p) => p,
         None => {
+            // The server's own sentence and BOTH codes, not just the general one: `2007` says
+            // "no media" and nothing about WHY, and the text is the only part of the refusal that
+            // names the cause (a share that will not serve the file, a track the profile cannot
+            // carry, a limitation the profile itself declared). It is the server's prose about the
+            // file, never a credential, so it is safe in the event log.
             crate::player::log(&format!(
-                "decision: no media (general={:?}) -> no Original",
-                mc.general_decision_code
+                "decision: no media (general={:?} {:?} transcode={:?} {:?}) -> no Original",
+                mc.general_decision_code,
+                mc.general_decision_text,
+                mc.transcode_decision_code,
+                mc.transcode_decision_text,
             ));
             return None;
         }
