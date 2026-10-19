@@ -480,6 +480,106 @@ fn a_session_resolved_for_a_preview_never_reports_a_timeline() {
     reset_session(&mut ps);
 }
 
+/// **A preview must give the stream back.** A hero trailer is a real playback on the server: it
+/// registers a session under its own id, and a share that allows ONE playback at a time counts it.
+/// The preview's promise is only "no watch state" — no timeline, no scrobble — and that promise was
+/// read as "do nothing at all", so the session was never released and every film afterwards answered
+/// "Hai troppi stream attivi" for the rest of the session (measured on a real share). The stop below
+/// posts neither a timeline nor a scrobble; it closes the resource the preview took.
+#[test]
+fn a_preview_stop_releases_the_stream_it_took_and_posts_no_watch_state() {
+    let mut ps = crate::route::PlaybackSession::IDLE;
+    use std::time::Duration;
+    let _g = fresh_registry(&mut ps);
+    drain_scrobble();
+    reset_session(&mut ps);
+    reset_player_control_for_test(&ps);
+
+    // Two connections, both answered 404: the first is the transcode stop (a preview is a direct
+    // play, so PMS has no encoder for it), the second is the resource close — the one that releases
+    // the slot, and 404 is its idempotent already-closed answer.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port() as i32;
+    let (seen_tx, seen_rx) = std::sync::mpsc::channel::<String>();
+    let server = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader, Write};
+        for _ in 0..2 {
+            let Some(Ok(mut socket)) = listener.incoming().next() else { return };
+            let mut line = String::new();
+            let _ = BufReader::new(&socket).read_line(&mut line);
+            let _ = socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+            if seen_tx.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let sid = plx_plex::plex::register_for_test(
+        "preview-release",
+        "127.0.0.1",
+        port,
+        "preview-token",
+        "preview-client",
+    );
+
+    ps.request = Some(PlaybackRequest {
+        sid,
+        rk: "trailer".into(),
+        part: "/library/parts/1/file.mp4".into(),
+        vcodec: "h264".into(),
+        acodec: "aac".into(),
+        title: "Trailer".into(),
+        ctx: plx_data::metadata::TRAILER_CONTEXT.into(),
+        version: 0,
+        preview: true,
+    });
+    apply_plan(
+        &mut ps,
+        Plan {
+            sid,
+            url: "https://example.invalid/trailer.mp4".into(),
+            sess: "preview-session".into(),
+            ..Default::default()
+        },
+        "trailer",
+    );
+    assert!(preview_request(&ps), "the trailer's session is marked as a preview");
+
+    // A final report is offered, exactly as a real teardown offers one.
+    scrobble_stop(&mut ps, Some(("trailer".into(), 1_000, 20_000)), None);
+    drain_scrobble();
+
+    let first = seen_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the preview never asked the server for anything");
+    assert!(
+        first.contains("/video/:/transcode/universal/stop"),
+        "the preview's own stream was not stopped: {first}"
+    );
+    let second = seen_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the preview never released its stream");
+    assert!(
+        second.contains("/status/sessions/close"),
+        "the preview's stream was not released: {second}"
+    );
+    assert!(
+        second.contains("X-Plex-Session-Identifier=preview-session"),
+        "the wrong session was released: {second}"
+    );
+    for line in [&first, &second] {
+        assert!(
+            !line.contains("/:/timeline"),
+            "a preview must not post watch state: {line}"
+        );
+    }
+
+    server.join().unwrap();
+    plx_plex::plex::reset_servers_for_test();
+    reset_session(&mut ps);
+    install_active_encoder("");
+    reset_player_control_for_test(&ps);
+}
+
 /// **A film pressed after a trailer is a film from the press on.** `resolved_as_preview` is fixed
 /// at a landing, so a film whose resolve never lands (a refused worker spawn, a superseded
 /// request) left the PREVIOUS trailer's flag standing: the failure read-out of the film was then

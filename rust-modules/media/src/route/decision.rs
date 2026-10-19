@@ -5694,6 +5694,9 @@ struct ScrobbleWork {
     audio_stream_id: i64,
     subtitle_stream_id: i64,
     transcode_session: String,
+    /// This stop belongs to a hero preview: it releases the stream and posts nothing, and the log
+    /// line says which kind of stop it was.
+    preview: bool,
     timeline_stop: Option<TimelineStopCompletion>,
     /// The record the app learns this stop from; posted just before `timeline_stop` completes.
     stop_mail: Option<PendingStop>,
@@ -5844,7 +5847,8 @@ impl ScrobbleWork {
                     == Some(true)
             };
             plx_base::eventlog::log(&format!(
-                "transcode stopped ok={} resource_closed={}",
+                "{}transcode stopped ok={} resource_closed={}",
+                if self.preview { "preview: " } else { "" },
                 stopped as i32,
                 closed as i32
             ));
@@ -5861,6 +5865,13 @@ impl ScrobbleWork {
 /// (~17 s), on **100% of real stops**. That was the largest guaranteed main-loop park left in the
 /// engine, and strictly bigger than the rare in-flight-POST window at the joins above it.
 ///
+/// **A preview keeps the promise and loses the stream.** A hero trailer is a real playback on the
+/// server, and a share that allows ONE playback at a time counts it — so the early return this used
+/// to take for `preview_request` left the trailer's session registered and locked every film out for
+/// the rest of the session (measured on a real share: "Hai troppi stream attivi" on every play). The
+/// report is dropped (no timeline, no scrobble, no stop record — that is what "no watch state" means)
+/// and the session it took is closed instead.
+///
 /// Everything the worker needs is read HERE, on the main thread, and the two fields a stop retires
 /// are cleared here too: the [`Session`] is a `static mut`, and what keeps it sound is that the main
 /// thread is its only writer. The worker gets owned copies and touches none of it — the same
@@ -5870,12 +5881,25 @@ pub fn scrobble_stop(
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
 ) {
-    if preview_request(ps) {
-        return;
-    }
+    let is_preview = preview_request(ps);
+    // **A preview writes no watch state — that is why its report is dropped here — and it must
+    // still GIVE THE STREAM BACK.** The timeline, the scrobble and the stop record are the promise;
+    // the session is a separate obligation. A server counts a preview's own session against the
+    // account's stream limit, and a share that allows ONE playback at a time is left with none:
+    // measured on a real share, the hero trailer preview saturated the limit and every film
+    // afterwards answered "Hai troppi stream attivi" for the rest of the session, even though the
+    // preview itself had ended. The stop below is `/video/:/transcode/universal/stop` +
+    // `/status/sessions/close`, neither of which is a timeline report, so posting them keeps the
+    // promise and frees the share. MAIN THREAD.
+    let final_report = if is_preview { None } else { final_report };
     let (logical_session, pq, pqi) = (sess(ps), pq_id(ps), pq_item_id(ps));
     let (aud, sub) = (cur_audio_sid(ps), cur_sub_sid(ps)); // the selection this playback reported under
-    let tsession = take_active_encoder();
+    let mut tsession = take_active_encoder();
+    if is_preview && tsession.is_empty() {
+        // A preview that never got a URL still registered its own MDE session under the logical id;
+        // that is the stream to give back, so the close below has something to close.
+        tsession = logical_session.clone();
+    }
     let session = if tsession.is_empty() {
         logical_session
     } else {
@@ -5928,6 +5952,7 @@ pub fn scrobble_stop(
         audio_stream_id: aud,
         subtitle_stream_id: sub,
         transcode_session: tsession,
+        preview: is_preview,
         timeline_stop,
         stop_mail,
     })));
