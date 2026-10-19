@@ -451,21 +451,24 @@ fn two_items_of_one_title_on_one_server_are_one_continue_watching_card() {
     plx_plex::plex::reset_servers_for_test();
 }
 
-/// **…and one title on TWO servers stays two cards.** That is the design's rule, not an oversight:
-/// merging the copies invisibly is what makes a film vanish when a friend's server goes offline,
-/// and *Also available* is the answer instead. The rule is therefore `(sid, title)`, never the
-/// title alone.
+/// **…and one title on TWO servers draws ONCE too** — the owner's rule: "1 locandina per ogni film
+/// in continua a guardare, poi dentro il tasto per scegliere le versioni". The surviving card is the
+/// most recently viewed copy; the other is still reachable from the title's own page.
 #[test]
-fn one_title_on_two_servers_stays_two_continue_watching_cards() {
+fn one_title_on_two_servers_draws_one_continue_watching_card() {
     let _guard = plx_base::testlock::serial();
     plx_plex::plex::reset_servers_for_test();
     let a = plx_plex::plex::register_for_test("deck-guid-a", "127.0.0.1", 9, "synthetic", "fixture").raw();
     let b = plx_plex::plex::register_for_test("deck-guid-b", "127.0.0.2", 10, "synthetic", "fixture").raw();
     let owner = guid_owner(vec![
-        guid_source(a, &[("1", [7; 12], 3000)]),
-        guid_source(b, &[("1", [7; 12], 2000)]),
+        guid_source(a, &[("7", [7; 12], 2000)]),
+        guid_source(b, &[("9", [7; 12], 3000)]),
     ]);
-    assert_eq!(rks(&owner.state, 0), ["1", "1"], "two servers holding one film are two cards");
+    assert_eq!(
+        rks(&owner.state, 0),
+        ["9"],
+        "one film on two servers is one card, and the most recently viewed copy is the one kept"
+    );
     plx_plex::plex::reset_servers_for_test();
 }
 

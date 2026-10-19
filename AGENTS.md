@@ -43,8 +43,25 @@ dell'utente, nella stessa richiesta.
   stop and ask.
 - **Standing instruction (user, 2026-10-19): on every change, build on GitHub Actions and `git
   push`.** Push over SSH (this checkout's key authenticates as `wes1993`; the HTTPS remote carries
-  no credential). The fork's `CI` workflow is active, so a push to any branch runs the ARM
-  cross-build and uploads the `plxnative-<sha>` artifact.
+  no credential). The fork's `CI` workflow is active and its `push` trigger is `branches: [main,
+  'release/v*']` ONLY — so the work must reach `main` (or a `release/v*` branch) for CI to run; a
+  plain feature branch does NOT start a build.
+- **Install ONLY our own builds.** `plxnative-<sha>` artifact of a CI run on `wes1993/plx-native`
+  (the debug ipk, `com.beb.plxnative.debug`). Never upstream's or another fork's ipk for install /
+  launch — the one upstream-nightly install was a one-off compatibility test the user explicitly
+  approved.
+- **A GitHub PAT for artifact downloads lives at `/workspace/.gh-token`** (mode 600, OUTSIDE the
+  repo, so it can never be committed). **That token was pasted into the chat, so it is compromised:
+  it must be revoked and replaced, and this file updated, as soon as the user agrees.** Read it as
+  `TOKEN=$(cat /workspace/.gh-token)` and pass it
+  as `Authorization: Bearer $TOKEN`. **Never print it, never copy it into the repo, never echo the
+  command that contains its value.** Download an artifact with
+  `curl -sSL -H "Authorization: Bearer $TOKEN" -o a.zip
+  https://api.github.com/repos/wes1993/plx-native/actions/artifacts/<id>/zip`, then unzip.
+- **The loop**: change → commit → `git push origin HEAD:main` → watch the `CI` run → download the
+  `plxnative-<sha>` artifact → `ares-install --device TV-Cucina <ipk>` → `ares-launch`. The host
+  unit-test job goes red on `fixture_preflight` until the replay fixtures are re-recorded (macOS
+  simulator); the `armv7 cross-build` job is independent and still produces the ipk.
 
 (The user's TV rules also named the app id `com.wes93.fastplexwebos` and
 `/workspace/fastplex-webos` artifacts. Those clauses belong to another project and are

@@ -2051,35 +2051,43 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
             cw.sort_by(|a, b| b.1.last_viewed_at.cmp(&a.1.last_viewed_at));
             (cw, 0, false)
         };
-    // **One card per title, per server.** Plex can hold one work as several ITEMS — the same film
-    // or episode present as separate `ratingKey`s, one per file, because the household's naming
-    // never merged them into one item's `Media[]` — and the server then lists every one of them in
-    // Continue Watching. Those rows are genuinely distinct (distinct keys, distinct positions), so
-    // the deck's own key rule does not touch them: it is one TITLE drawn as many times. The first
-    // card in merged order wins, i.e. the most recently viewed copy, because that is the order the
-    // deck already decided and this must not invent a second one.
+    // **One card per title.** A title can reach the deck more than once for two different reasons,
+    // and both are ONE film drawn twice rather than two things to watch:
+    //   1. a server holds the work as several ITEMS — separate `ratingKey`s, one per file, because
+    //      the household's naming never merged them into one item's `Media[]`;
+    //   2. two SOURCES hold the same work, each contributing its own row.
+    // (A work held as one item with several `Media[]` is ONE row and never reaches here at all.)
     //
-    // **Scoped to ONE server, deliberately.** Two servers holding one film are two cards, and that
-    // is the design's rule rather than an oversight: merging the copies invisibly is what makes a
-    // film vanish when a friend's server goes offline, and *Also available*
-    // (`screens::alt_sources`) is the answer instead. So the key is `(sid, title)`, never the title
-    // alone — and a `title_key` of `None` (an unmatched item) is never merged with anything.
-    let mut seen: Vec<(ServerId, TitleKey)> = Vec::new();
+    // The first card in merged order wins — the most recently viewed copy — because that is the
+    // order the deck already decided and this must not invent a second one. `title_key` is the
+    // portable identity (`plex://movie|show/<hex>`, plus an episode's own address), so it survives a
+    // `ratingKey` move; a `None` key (an unmatched item, a collection) is never merged with anything.
+    //
+    // **Merging across sources is a deliberate PRODUCT decision, and it is the owner's**
+    // (2026-10-19): "1 locandina per ogni film in continua a guardare, poi dentro il tasto per
+    // scegliere le versioni". The design record's alternative — keep both rows and let *Also
+    // available* switch between them — was the first cut of this rule, and the owner reported the
+    // duplicate poster as the bug. What the design comment warned about is bounded by the merge
+    // running on every landing: a source that leaves the roster moves the card to the other copy
+    // instead of removing it, and the dropped copy is still reachable from the title's own page
+    // (*Also available*, which is unchanged).
+    let mut seen: Vec<TitleKey> = Vec::new();
     let mut merged = 0usize;
     cw.retain(|(_, c)| {
         let Some(key) = c.m.title_key() else { return true };
-        if seen.iter().any(|(sid, k)| *sid == c.m.sid && *k == key) {
+        if seen.contains(&key) {
             merged += 1;
             return false;
         }
-        seen.push((c.m.sid, key));
+        seen.push(key);
         true
     });
     if merged > 0 {
         // Said out loud for the same reason the repeated-key line is: it is the difference between
-        // "the server lists this title as several items" and "the client drew it several times".
+        // "the library or the servers list this title more than once" and "the client drew it more
+        // than once".
         plx_base::eventlog::log(&format!(
-            "deck: {merged} continue-watching card(s) were another item of a title already shown on the same server; one card kept per title"
+            "deck: {merged} continue-watching card(s) were another copy of a title already shown; one card kept per title"
         ));
     }
     cw.truncate(MAX_SHELF_ITEMS);
