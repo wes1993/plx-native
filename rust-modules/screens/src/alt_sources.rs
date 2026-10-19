@@ -86,7 +86,6 @@ use std::convert::Infallible;
 use plx_data::metadata::AltCopy;
 use plx_plex::plex::ServerId;
 use crate::registry::{AppLike, AppMsg, ContentArg, PageMemory};
-use plx_ui::consts::{SCR_H, SCR_W};
 use plx_ui::frame::Budget;
 use plx_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind,
@@ -98,7 +97,7 @@ use plx_ui::screen::{
     Stop,
 };
 use plx_ui::form::{Form, FormSection, FormTable, RowKey, RowKind};
-use plx_ui::table::{Badge, Row, TableView, MENU_MAX_W, MENU_MIN_W};
+use plx_ui::table::{Badge, Row, TableView};
 use plx_ui::{theme, Rect};
 
 /// The fields [`AltSourcesScreen::write`] canonicalises, for the recorder's shape pin (§5.4). The
@@ -141,14 +140,6 @@ impl LogicalState for AltSourcesArg {
 
 /// The pinned ~20px corner radius, the item menu's.
 const PANEL_RAD: f32 = 20.0;
-/// Air between the button that opened the panel and the panel itself — one `space` rung.
-const BTN_GAP: f32 = theme::space::MD;
-/// Keep-out from the screen edges, so a panel opened low on the page is still whole.
-///
-/// Per AXIS, for `item_menu::EDGE`'s reason: `space::XL` 64 clears `MARGIN_Y` vertically and misses
-/// `MARGIN_X` horizontally by 32px.
-const EDGE: f32 = theme::space::XL;
-const EDGE_X: f32 = plx_ui::consts::MARGIN_X;
 /// How far the panel rises into place, matching those same chip menus. The container's appear
 /// spring drives it now (`DrawFrame::page_alpha` IS `Surface::motion.appear`), so the translate is
 /// applied here rather than by `Popover::painter`; at rest it contributes nothing, which is what
@@ -160,17 +151,11 @@ const RISE: f32 = plx_ui::popover::Popover::RISE;
 /// button's left edge (the list and the label it came from share a margin), pulled inside the
 /// screen's keep-out. Pure (anchor + measured height in, rect out), so the placement rules are
 /// host-testable without mounting anything.
+///
+/// The rule itself is [`plx_ui::table::menu_panel_at`], shared with the *Versions* menu — the
+/// screen layer may not name a sibling screen, so the geometry lives below both.
 pub fn panel_at(a: Rect, content_w: f32, content_h: f32) -> Rect {
-    let width = content_w.clamp(MENU_MIN_W, MENU_MAX_W);
-    let h = content_h.clamp(120.0, SCR_H - 2.0 * EDGE);
-    let below = a.y + a.h + BTN_GAP;
-    let y = if below + h <= SCR_H - EDGE {
-        below
-    } else {
-        (a.y - BTN_GAP - h).max(EDGE)
-    };
-    let x = a.x.clamp(EDGE_X, (SCR_W - EDGE_X - width).max(EDGE_X));
-    Rect::new(x, y, width, h)
+    plx_ui::table::menu_panel_at(a, content_w, content_h)
 }
 
 // ---- the model (pure) ------------------------------------------------------------------------

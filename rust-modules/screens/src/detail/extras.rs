@@ -51,6 +51,8 @@ pub fn play(d: &Detail, key: u32) -> Option<PlayIntent> {
         acodec: extra.acodec.clone(),
         title: extra.hud_title(d.title.as_str()).to_string(),
         context: extra_play_context(extra).into(),
+        // An extra is a file of its own, with one version: the picker never applies.
+        version: 0,
     })
 }
 

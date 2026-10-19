@@ -1271,6 +1271,10 @@
     "value": "NR",
     "description": "Not rated: compact fallback for a missing content age rating"
   },
+  "browse.detail.versions": {
+    "value": "Versions",
+    "description": "Detail-page hero pill that opens the version picker, for a title Plex holds as several files (a 4K and a 1080p cut). Keep it short: it is a pill beside Play."
+  },
   "browse.diagnostics.frames_none": {
     "value": "none in {seconds} s",
     "args": {

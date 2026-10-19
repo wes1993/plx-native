@@ -143,10 +143,10 @@ pub(super) fn request_play_intent(
 ) -> bool {
     match play {
         plx_screens::registry::PlayIntent::Item {
-            sid, rk, part, vcodec, acodec, title, context,
+            sid, rk, part, vcodec, acodec, title, context, version,
         } => {
             let ok = plx_media::route::request_play(
-                session, meta, *sid, rk, part, vcodec, acodec, title, context,
+                session, meta, *sid, rk, part, vcodec, acodec, title, context, *version,
             );
             if ok {
                 note_extra_now_playing(meta, *sid, rk, context);
@@ -349,6 +349,7 @@ mod held_feature_tests {
             acodec: String::new(),
             title: "Official Trailer".into(),
             context: context.into(),
+            version: 0,
         }
     }
 

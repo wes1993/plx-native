@@ -5,6 +5,12 @@
 use super::*;
 use plx_data::metadata::{alt_source_count, alt_stand_in};
 use plx_data::stores::metadata::MetadataCmd;
+// The anchored-menu geometry is `plx_ui::table::menu_panel_at`'s now (shared with the *Versions*
+// menu), so the placement tests name ITS constants rather than a private copy's.
+use plx_ui::consts::{SCR_H, SCR_W};
+use plx_ui::table::{
+    MENU_BTN_GAP as BTN_GAP, MENU_EDGE_X as EDGE_X, MENU_EDGE_Y as EDGE, MENU_MAX_W, MENU_MIN_W,
+};
 
 // TEST ONLY: see `screens::detail::tests`'s `TEST_METADATA` for why the owner lives here,
 // thread-confined, rather than being threaded through every call site in this file. Reached only

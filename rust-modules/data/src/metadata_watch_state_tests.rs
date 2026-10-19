@@ -306,7 +306,7 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
         ..Default::default()
     }));
 
-    let hit = cached_playing(test_state(), SRV_A, "42").expect("the loaded page IS this item");
+    let hit = cached_playing(test_state(), SRV_A, "42", 0).expect("the loaded page IS this item");
     assert_eq!(
         (hit.sid, hit.rk.as_str()),
         (SRV_A, "42"),
@@ -315,12 +315,12 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
     assert_eq!(hit.audio.first().map(|s| s.id), Some(7));
 
     assert!(
-        cached_playing(test_state(), SRV_B, "42").is_none(),
+        cached_playing(test_state(), SRV_B, "42", 0).is_none(),
         "the SHARE's 42 is a different film"
     );
-    assert!(cached_playing(test_state(), SRV_A, "43").is_none());
+    assert!(cached_playing(test_state(), SRV_A, "43", 0).is_none());
     assert!(
-        cached_playing(test_state(), plx_plex::plex::ServerId::UNSET, "42").is_none(),
+        cached_playing(test_state(), plx_plex::plex::ServerId::UNSET, "42", 0).is_none(),
         "unscoped names neither"
     );
 
@@ -332,7 +332,7 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
         ..Default::default()
     }));
     assert!(
-        cached_playing(test_state(), SRV_A, "42").is_none(),
+        cached_playing(test_state(), SRV_A, "42", 0).is_none(),
         "no streams loaded yet — go and fetch"
     );
     clear(test_state(), test_adapter());
@@ -346,11 +346,11 @@ fn the_playing_item_carries_its_plex_type() {
     for wire in ["episode", "movie", "track"] {
         let it: plx_plex::plex::Metadata =
             serde_json::from_value(serde_json::json!({ "type": wire })).unwrap();
-        let item = playing_item_from(SRV_A, "42", Some(&it));
+        let item = playing_item_from(SRV_A, "42", Some(&it), 0);
         assert_eq!(item.kind, wire, "the played item's own type");
     }
     assert_eq!(
-        playing_item_from(SRV_A, "42", None).kind,
+        playing_item_from(SRV_A, "42", None, 0).kind,
         "",
         "an item the server did not return has no type"
     );
@@ -365,10 +365,10 @@ fn the_playing_item_carries_the_video_hdr_flag() {
             { "streamType": 1, "colorTrc": trc }
         ] }] }] })).unwrap()
     };
-    assert!(playing_item_from(SRV_A, "42", Some(&leaf("smpte2084"))).hdr, "HDR10");
-    assert!(playing_item_from(SRV_A, "42", Some(&leaf("arib-std-b67"))).hdr, "HLG");
-    assert!(!playing_item_from(SRV_A, "42", Some(&leaf("bt709"))).hdr, "SDR");
-    assert!(!playing_item_from(SRV_A, "42", None).hdr, "no item, no HDR");
+    assert!(playing_item_from(SRV_A, "42", Some(&leaf("smpte2084")), 0).hdr, "HDR10");
+    assert!(playing_item_from(SRV_A, "42", Some(&leaf("arib-std-b67")), 0).hdr, "HLG");
+    assert!(!playing_item_from(SRV_A, "42", Some(&leaf("bt709")), 0).hdr, "SDR");
+    assert!(!playing_item_from(SRV_A, "42", None, 0).hdr, "no item, no HDR");
 }
 
 /// The cache hit must hand back the same `kind` the page loaded, so a play from a detail page
@@ -383,7 +383,7 @@ fn the_playing_item_cache_round_trips_the_kind() {
         audio: vec![Stream { id: 7, ..Default::default() }],
         ..Default::default()
     }));
-    let hit = cached_playing(test_state(), SRV_A, "42").expect("the loaded page IS this item");
+    let hit = cached_playing(test_state(), SRV_A, "42", 0).expect("the loaded page IS this item");
     assert_eq!(hit.kind, "episode", "the cache carries the page's own type");
     clear(test_state(), test_adapter());
 }
@@ -406,23 +406,23 @@ fn the_playing_item_cache_is_not_trusted_once_the_item_has_played() {
     };
     let embedded = Stream { id: 5, selected: true, ..Default::default() };
     set_current_for_test(test_state(), Some(page(vec![embedded.clone()])));
-    assert!(cached_playing(test_state(), SRV_A, "42").is_some(), "precondition: a page nobody played from is a cache");
+    assert!(cached_playing(test_state(), SRV_A, "42", 0).is_some(), "precondition: a page nobody played from is a cache");
 
-    install_playing(test_state(), cached_playing(test_state(), SRV_A, "42"));
+    install_playing(test_state(), cached_playing(test_state(), SRV_A, "42", 0));
     assert!(
-        cached_playing(test_state(), SRV_A, "42").is_none(),
+        cached_playing(test_state(), SRV_A, "42", 0).is_none(),
         "the item played since this page was read: its stream list may be stale — fetch it"
     );
 
     // another item's playback does not spoil this page
     set_current_for_test(test_state(), Some(Detail { rk: "43".into(), ..page(vec![embedded.clone()]) }));
-    assert!(cached_playing(test_state(), SRV_A, "43").is_some());
+    assert!(cached_playing(test_state(), SRV_A, "43", 0).is_some());
 
     // a fresh landing of the played item is a fresh read
     set_current_for_test(test_state(), Some(page(vec![embedded.clone()])));
-    install_playing(test_state(), cached_playing(test_state(), SRV_A, "42"));
+    install_playing(test_state(), cached_playing(test_state(), SRV_A, "42", 0));
     assert!(install_landed_detail(test_state(), test_adapter(), Some(page(vec![embedded]))));
-    assert!(cached_playing(test_state(), SRV_A, "42").is_some(), "read after the playback: trusted again");
+    assert!(cached_playing(test_state(), SRV_A, "42", 0).is_some(), "read after the playback: trusted again");
     clear(test_state(), test_adapter());
 }
 

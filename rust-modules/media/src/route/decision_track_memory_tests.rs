@@ -941,6 +941,7 @@ fn request(sid: ServerId, preview: bool) -> PlaybackRequest {
         acodec: "eac3".into(),
         title: "Episode".into(),
         ctx: String::new(),
+        version: 0,
         preview,
     }
 }

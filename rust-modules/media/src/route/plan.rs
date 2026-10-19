@@ -1185,6 +1185,11 @@ pub struct ResolveEnv {
     /// [`Session::cur_sid`]): captured on the main thread with everything else here, because the
     /// resolve worker must not read the current server itself.
     pub sid: ServerId,
+    /// **Which `Media[]` version this resolve is against** — the version picker's choice, 0 for
+    /// every caller with no picker. It selects the `PlayingItem` this resolve reasons about (the
+    /// streams, the frame size, the fps, the Dolby Vision layering) and the source bitrate the
+    /// quality ceiling judges, so a chosen version is never measured as the item's first one.
+    pub version: usize,
     /// `machine_id`, but only when it was learned from `sid`'s own server (`machine_sid`);
     /// otherwise empty, so the worker re-asks rather than addressing a queue to the wrong machine.
     pub machine_id: String,
@@ -1302,10 +1307,17 @@ pub(super) fn detail_describes(d: &plx_data::metadata::Detail, sid: ServerId, rk
 /// that never got an episode backfill and for an audio-only part, and PMS omits the field often
 /// enough that the whole-file fallback has to stay. Falling back is the conservative direction,
 /// which is the right one here — see [`plx_plex::plex::Ceiling::admits`].
-pub(super) fn source_kbps(d: &plx_data::metadata::Detail) -> i64 {
-    match d.video.as_ref().map(|v| v.bitrate) {
+pub(super) fn source_kbps(d: &plx_data::metadata::Detail, version: usize) -> i64 {
+    // The version's own record when the picker holds one; `Detail`'s flattened block (which IS
+    // version 0) otherwise. A chosen version must be measured as itself: the ceiling judges the
+    // file about to be fetched, and version 0's bitrate can be a different rung entirely.
+    let (video_kbps, whole) = match d.versions.get(version) {
+        Some(v) => (v.video.as_ref().map(|s| s.bitrate), v.bitrate),
+        None => (d.video.as_ref().map(|s| s.bitrate), d.bitrate),
+    };
+    match video_kbps {
         Some(b) if b > 0 => b,
-        _ => d.bitrate,
+        _ => whole,
     }
 }
 
@@ -1316,6 +1328,7 @@ pub(super) fn resolve_src_kbps(
     d: Option<&plx_data::metadata::Detail>,
     sid: ServerId,
     rk: &str,
+    version: usize,
 ) -> i64 {
     let Some(d) = d else {
         return 0;
@@ -1328,7 +1341,7 @@ pub(super) fn resolve_src_kbps(
         return extra.bitrate;
     }
     if detail_describes(d, sid, rk) {
-        source_kbps(d)
+        source_kbps(d, version)
     } else {
         0
     }
@@ -1575,7 +1588,7 @@ pub(super) fn build_stream(off: &plx_base::task::OffFrame, rk: &str, part: &str,
     plan.playing = env
         .cached_item
         .clone()
-        .or_else(|| plx_data::metadata::fetch_playing_item(env.sid, rk));
+        .or_else(|| plx_data::metadata::fetch_playing_item(env.sid, rk, env.version));
     plan.src_fps = plan.playing.as_ref().map_or(0.0, |p| p.video_fps);
     plan.playing_fresh = env.cached_item.is_none() && plan.playing.is_some();
     if let (Some(id), Some(item)) = (env.subtitle_override, plan.playing.as_mut()) {

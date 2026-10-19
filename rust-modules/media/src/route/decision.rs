@@ -57,6 +57,12 @@ struct PlaybackRequest {
     acodec: String,
     title: String,
     ctx: String,
+    /// **Which `Media[]` version of `rk` this play is against** — the version picker's choice
+    /// (`screens::versions`), 0 for every caller that has no picker (a preview, a shelf play, an
+    /// Up Next). It selects the `PlayingItem` streams the resolve reasons about, so a chosen
+    /// version is judged by its own frame size, audio tracks and Dolby Vision rather than the
+    /// item's first version.
+    version: usize,
     /// Background hero preview. No PlayQueue, no timeline, no scrobble, resume at 0, and the
     /// caller must not push the player route.
     preview: bool,
@@ -7436,6 +7442,10 @@ impl ResolveEnv {
         let s = ps;
         ResolveEnv {
             sid,
+            // Version 0 until [`request_env`] raises it for a picker choice: `snapshot` has no
+            // request, and every caller that is not a version-picking play wants the item's first
+            // version exactly as it always did.
+            version: 0,
             // the cache only counts when it was learned from the server this play is against
             machine_id: if s.machine_sid == sid {
                 s.machine_id.clone()
@@ -7452,10 +7462,10 @@ impl ResolveEnv {
             subtitle_override: None,
             sub_mode: SubMode::Track,
             forced_lang: forced_only_lang(ps).to_string(),
-            cached_item: meta.cached_playing(sid, rk),
+            cached_item: meta.cached_playing(sid, rk, 0),
             quality: quality(),
             direct_play_mode: direct_play_mode(),
-            src_kbps: resolve_src_kbps(meta.current(), sid, rk),
+            src_kbps: resolve_src_kbps(meta.current(), sid, rk, 0),
             omit_queue_continuous: false,
             preview: false,
             audio_enhancements: crate::player::audio_enhancements(),
@@ -7720,6 +7730,7 @@ pub fn request_play(
     acodec: &str,
     title: &str,
     ctx: &str,
+    version: usize,
 ) -> bool {
     request_play_inner(
         ps,
@@ -7732,6 +7743,7 @@ pub fn request_play(
             acodec: acodec.to_owned(),
             title: title.to_owned(),
             ctx: ctx.to_owned(),
+            version,
             preview: false,
         },
         None,
@@ -7764,6 +7776,8 @@ pub fn request_preview(
             acodec: acodec.to_owned(),
             title: title.to_owned(),
             ctx: plx_data::metadata::TRAILER_CONTEXT.to_owned(),
+            // A preview is a trailer extra, which carries one version: no picker, index 0.
+            version: 0,
             preview: true,
         },
         None,
@@ -7791,6 +7805,16 @@ fn request_env(
     env.omit_queue_continuous = plx_data::metadata::context_omits_queue_continuous(&request.ctx);
     env.set_preview(request.preview);
     env.fresh_play = retry.is_none() && !request.preview;
+    // **The version picker's choice, raised here and nowhere else.** `snapshot` has no request, so
+    // it answers version 0; a play against another `Media[]` entry must have that version's own
+    // streams and source rate, or the resolve would judge the picked file by the item's first one
+    // (its frame size, its audio tracks, its Dolby Vision, its rung) — the silent-substitution
+    // class `cached_playing`'s `(sid, rk)` test guards, one axis over.
+    if request.version != 0 {
+        env.version = request.version;
+        env.cached_item = meta.cached_playing(request.sid, &request.rk, request.version);
+        env.src_kbps = resolve_src_kbps(meta.current(), request.sid, &request.rk, request.version);
+    }
     if let Some(retry) = retry {
         apply_retry(&mut env, retry);
     }
@@ -8138,6 +8162,8 @@ pub fn request_play_movie(ps: &mut PlaybackSession, meta: &mut plx_data::stores:
         &m.acodec,
         &m.title,
         ctx,
+        // A catalog row carries one version (`Media[0]`); the picker is a Detail-page control.
+        0,
     )
 }
 
@@ -8178,7 +8204,8 @@ pub fn request_play_up_next(ps: &mut PlaybackSession, meta: &mut plx_data::store
     } else {
         surface_sid()
     };
-    request_play(ps, meta, sid, &u.rk, &u.part, &u.vcodec, &u.acodec, title, ctx)
+    // The successor comes from the running item's PlayQueue, which carries one version.
+    request_play(ps, meta, sid, &u.rk, &u.part, &u.vcodec, &u.acodec, title, ctx, 0)
 }
 
 /// Supersede an in-flight resolve (BACK during a load). The landing is dropped by generation.

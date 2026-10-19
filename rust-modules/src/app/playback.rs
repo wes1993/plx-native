@@ -436,8 +436,9 @@ pub(crate) fn request_loaded_hero(ps: &mut plx_media::route::PlaybackSession, me
             .clone();
         request_episode(ps, meta, &d, &ep).then(|| plx_data::metadata::resume_ns(ep.resume_ms, ep.dur_ms))
     } else {
+        // A shelf/deck play carries no picker choice: version 0, the item's first version.
         plx_media::route::request_play(ps, meta, plx_media::route::item_sid(d.sid), &d.rk, &d.part,
-            &d.vcodec, &d.acodec, &d.title, "")
+            &d.vcodec, &d.acodec, &d.title, "", 0)
             .then(|| plx_data::metadata::resume_ns(d.resume_ms, d.dur_ms))
     }
 }
@@ -457,8 +458,9 @@ fn request_episode(ps: &mut plx_media::route::PlaybackSession, meta: &mut plx_da
     })));
     let title = if ep.title.is_empty() { &d.title } else { &ep.title };
     let context = format!("{}  ·  {}", d.title, plx_ui::fmt::episode_ordinal(ep.season, ep.index));
+    // The deck/Up-Next episode path carries no picker choice: version 0.
     plx_media::route::request_play(ps, meta, plx_media::route::item_sid(d.sid), &ep.rk, &ep.part,
-        &ep.vcodec, &ep.acodec, title, &context)
+        &ep.vcodec, &ep.acodec, title, &context, 0)
 }
 
 /// Leaving playback (Stop / BACK / EOS / Info's jump-to-detail): retire every in-player panel.

@@ -600,6 +600,7 @@ fn cold_start_plan_lands_as_client_over_remux_with_a_reader_target() {
         acodec: "truehd".into(),
         title: String::new(),
         ctx: String::new(),
+        version: 0,
         preview: false,
     });
     assert_eq!(subtitle_presenter(&ps), SubtitlePresenter::ClientOverRemux);

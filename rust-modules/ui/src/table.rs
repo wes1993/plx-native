@@ -396,6 +396,40 @@ pub const MENU_MIN_W: f32 = 300.0;
 /// Content wider than this ellipsizes on screen and FAILS the per-menu localization tests, so a
 /// translation that needs more room is caught in `cargo test`, not on a customer's TV.
 pub const MENU_MAX_W: f32 = 650.0;
+
+/// Air between the control that opened an anchored menu and the menu itself — one `space` rung.
+/// `pub` for the same reason [`MENU_MIN_W`] is: a screen's own geometry test pins the placement
+/// against the SAME numbers the placement uses, rather than restating them.
+pub const MENU_BTN_GAP: f32 = theme::space::MD;
+/// The anchored menu's keep-out from the screen edges, **per AXIS** for `item_menu::EDGE`'s reason:
+/// `space::XL` (64) clears the vertical margin and misses the horizontal one by 32px, so a panel
+/// opened low on a page is still whole while one opened at the left edge does not hang off it.
+pub const MENU_EDGE_Y: f32 = theme::space::XL;
+pub const MENU_EDGE_X: f32 = crate::consts::MARGIN_X;
+
+/// **Where an anchored menu hangs**: under `anchor` when there is room, above it when there is not —
+/// never over it, so the control that opened the menu stays readable beside its own list.
+/// Horizontally it hangs off the anchor's LEFT edge (the list and the label it came from share a
+/// margin), pulled inside the screen's keep-out.
+///
+/// PURE (anchor + measured content size in, rect out), so the placement rules are host-testable
+/// without mounting anything. It is the shared home for the Detail page's two page-owned menus
+/// (`screens::alt_sources` and `screens::versions`), which are the same object off two pills — the
+/// screen layer may not name a sibling screen, so the geometry has to live below both.
+pub fn menu_panel_at(anchor: Rect, content_w: f32, content_h: f32) -> Rect {
+    let width = content_w.clamp(MENU_MIN_W, MENU_MAX_W);
+    let h = content_h.clamp(120.0, crate::consts::SCR_H - 2.0 * MENU_EDGE_Y);
+    let below = anchor.y + anchor.h + MENU_BTN_GAP;
+    let y = if below + h <= crate::consts::SCR_H - MENU_EDGE_Y {
+        below
+    } else {
+        (anchor.y - MENU_BTN_GAP - h).max(MENU_EDGE_Y)
+    };
+    let x = anchor
+        .x
+        .clamp(MENU_EDGE_X, (crate::consts::SCR_W - MENU_EDGE_X - width).max(MENU_EDGE_X));
+    Rect::new(x, y, width, h)
+}
 const CHECK_W: f32 = 32.0; // leading check column
 const GAP: f32 = 16.0; // check→label gap
 /// Focused-row pill corner radius. `pub` for the [`ROW_H`] caller shape.

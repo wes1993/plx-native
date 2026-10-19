@@ -90,7 +90,7 @@ const COMPACT_TITLE_FADE: f32 = 200.0;
 const K_SCROLL: f32 = plx_ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
 
-pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
+pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 // The blocks packed end to end: each section starts where the one before it ends, so the chain
 // proves they are disjoint. The episodes come last, at 2^30, and end where the engine keys begin.
@@ -246,6 +246,19 @@ pub struct DetailScreen {
     /// never on a bare `Some(false)`, which carries no identity and can belong to a stale request
     /// for the same (sid, rk) that predates this promotion's own admission.
     refresh_gen: u32,
+    /// **The version the Play control will use** — the viewer's pick off the version picker
+    /// (`screens::versions`), as an index into the loaded item's [`plx_data::metadata::Detail`]
+    /// `versions`. 0 is the item's first `Media[]` entry, which is what every play used before the
+    /// picker existed. A LOGICAL decision (it changes what Play does), so it is hashed into
+    /// [`SHAPE`]; clamped to what the loaded item offers at every read (`chosen_version`).
+    version: usize,
+    /// Has the viewer made a version choice for this visit? `false` makes the FIRST Play on a
+    /// multi-version item open the picker rather than guessing, and a pick sets it so every later
+    /// Play goes straight through. Hashed with [`Self::version`]: it changes what Play does.
+    version_chosen: bool,
+    /// A Play press waiting on the picker's answer, carrying whether it was Play-from-Start.
+    /// Transient — the answer lands within a frame or two — so it is deliberately NOT hashed.
+    version_ask: Option<bool>,
     restore_intent: Option<RestoreIntent>,
     /// This page has already sent its addressed `ClearItem` to the Metadata store. §3.4's
     /// `pop_sequence` delivers `WillLeave(ForGood)` AND `Unmount` to the same body, and both land
@@ -292,7 +305,11 @@ pub struct DetailScreen {
     cast: Shelf,
     tabs: TabStrip,
     season_pop: CtlPop<1>,
-    ctl_pop: CtlPop<5>,
+    /// One focus-pop spring per control the row can hold — sized by [`hero::MAX_CTLS`] so the
+    /// widest row's last controls (the watch toggle, and now *Versions*) pop like the rest.
+    /// `CtlPop::scale` answers 1.0 past its end rather than panicking, which is what kept the
+    /// under-sized array invisible: the tail simply never animated.
+    ctl_pop: CtlPop<{ hero::MAX_CTLS }>,
     disc_unfurl: [Spring; 3],
     /// The bookmark disc's face: what the app last said of the title's membership. Render and
     /// input state only (never hashed): the Watchlist store owns the truth, this page keeps no copy
@@ -558,6 +575,9 @@ impl DetailScreen {
             trailer_ctl: trailer::Transport::IDLE,
             refresh: DetailRefreshPhase::None,
             refresh_gen: 0,
+            version: 0,
+            version_chosen: false,
+            version_ask: None,
             restore_intent: None,
             teardown_cleared: false,
             withdrawn: false,
@@ -2258,6 +2278,17 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                 self.content(fx, ContentReq::Present(arg.clone()));
                 Handled::Yes
             }
+            // The version picker committed a row. It names WHICH version and nothing else — the
+            // panel only REPORTS, exactly as the *Also available* surface does — and this page
+            // remembers it and starts that version. `version_ask` carries whether the press that
+            // opened the picker was Play-from-Start; a pick from the *Versions* pill resumes.
+            ScreenEvent::App(AppMsg::VersionChosen { index }) => {
+                self.version = *index;
+                self.version_chosen = true;
+                let from_start = self.version_ask.take().unwrap_or(false);
+                self.play_hero(from_start, cx, fx, meta);
+                Handled::Yes
+            }
             // Dismissed: the page under this surface has just been entered again, and it decided
             // what to ask for on the store as it stands. A request of this page's still in flight
             // would land on top of the item that page found loaded — and this page's teardown,
@@ -2986,6 +3017,17 @@ impl DetailScreen {
                         .scale(scale)
                         .draw(&Env::inert(), p)
                 }
+                // The second picker pill, drawn exactly as *Also available* is: a labelled pill
+                // with a trailing chevron, because both open an anchored list rather than acting.
+                hero::HeroCtl::Versions => {
+                    Button::new(hero::versions_label().as_ptr(), theme::size::BODY, rect)
+                        .trailing_icon(plx_ui::icons::Icon::ChevronDown)
+                        .focused(focused)
+                        .palette(palette)
+                        .ground(ground)
+                        .scale(scale)
+                        .draw(&Env::inert(), p)
+                }
                 ctl => {
                     let icon = match ctl {
                         hero::HeroCtl::Restart => plx_ui::icons::Icon::Restart,
@@ -3377,6 +3419,7 @@ impl LogicalState for DetailScreen {
             DetailRefreshPhase::Deferred => 1,
             DetailRefreshPhase::Requested => 2,
         });
+        w.u32(self.version as u32).bool(self.version_chosen);
         match &self.restore_intent {
             Some(intent) => {
                 w.bool(true)
@@ -4132,6 +4175,10 @@ impl DetailScreen {
             restart,
             trailer: false,
             alt: self.alt_available(meta),
+            // The *Versions* pill exists only while the leaf the hero plays really carries a choice
+            // to make — one `Media[]` entry is not a picker, it is the file. `play_versions`, not
+            // `versions`: on a show page the choice belongs to the hero episode.
+            versions: self.detail(meta).is_some_and(|d| d.play_versions().len() > 1),
             mark,
             watchlist: self.detail(meta).is_some_and(|d| plx_plex::plex::catalog_hex_of_guid(&d.guid).is_some()),
         }
@@ -4261,6 +4308,41 @@ impl DetailScreen {
         fx.invalidate(Provenance::Input);
     }
 
+    /// The drawn rect of hero control `ctl` as a bit-preserving panel anchor, or `None` while the
+    /// control is not in the row. *Also available* and *Versions* are the two pills that hang a
+    /// panel off themselves and both need the same arithmetic — the page's live widths, the hero
+    /// chain's button row and the current scroll — so it lives once here.
+    fn hero_anchor<H: ContentLike>(
+        &self,
+        ctl: hero::HeroCtl,
+        cx: &Cx<'_, H>,
+        meta: plx_data::metadata::MetadataView<'_>,
+    ) -> Option<[u32; 4]> {
+        let set = self.hero_set(meta);
+        let i = hero::index_of(set, ctl)?;
+        let widths = hero::hero_widths(
+            cx.measure,
+            set,
+            set.restart,
+            self.disc_unfurl.map(|s| s.pos),
+            self.named_show(meta),
+        );
+        let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(cx.measure, meta).btn_y, widths);
+        rect.y -= self.scroll.pos;
+        Some([rect.x, rect.y, rect.w, rect.h].map(f32::to_bits))
+    }
+
+    /// The page's chosen version, clamped to what `versions` actually offers — `0` for a leaf with
+    /// no `Media[]` at all. The clamp is what keeps a pick made before a refresh that shrank the
+    /// list from indexing off the end.
+    fn clamp_version(&self, versions: &[plx_data::metadata::MediaVersion]) -> usize {
+        if versions.is_empty() {
+            0
+        } else {
+            self.version.min(versions.len() - 1)
+        }
+    }
+
     fn activate_hero<H: ContentLike>(
         &mut self,
         ctl: hero::HeroCtl,
@@ -4268,13 +4350,25 @@ impl DetailScreen {
         fx: &mut Effects<'_, H>,
         meta: plx_data::metadata::MetadataView<'_>,
     ) {
-        let measure = cx.measure;
         match ctl {
             hero::HeroCtl::Play => {
-                self.play_hero(false, fx, meta);
+                self.play_hero(false, cx, fx, meta);
             }
             hero::HeroCtl::Restart => {
-                self.play_hero(true, fx, meta);
+                self.play_hero(true, cx, fx, meta);
+            }
+            // The *Versions* pill: open the picker at the page's current choice. Picking a row
+            // plays that version (`AppMsg::VersionChosen`), which is also what a first Play on a
+            // multi-version item does — see `play_hero`.
+            hero::HeroCtl::Versions => {
+                if let Some(anchor) = self.hero_anchor(ctl, cx, meta) {
+                    let current = self.detail(meta).map_or(0, |d| self.clamp_version(d.play_versions()));
+                    // Opened to CHANGE the version, not to answer a Play: the pick resumes rather
+                    // than restarting, so a Play prompt the viewer dismissed must not leave its
+                    // `from_start` behind for this press to inherit.
+                    self.version_ask = None;
+                    self.content(fx, ContentReq::Panel(ContentPanel::Versions { anchor, current }));
+                }
             }
             hero::HeroCtl::Trailer => {
                 // Do not touch `NowPlaying` here. Extra/Detail live in `current()`, and a
@@ -4291,29 +4385,16 @@ impl DetailScreen {
                     acodec: extra.acodec.clone(),
                     title: title.to_string(),
                     context: plx_data::metadata::TRAILER_CONTEXT.into(),
+                    // An extra is a file of its own, with one version: the picker never applies.
+                    version: 0,
                 };
                 self.content(fx, ContentReq::Play { play, resume_ns: 0 });
             }
             hero::HeroCtl::Alt => {
-                let set = self.hero_set(meta);
-                if let Some(i) = hero::index_of(set, ctl) {
-                    let widths = hero::hero_widths(
-                        cx.measure,
-                        set,
-                        set.restart,
-                        self.disc_unfurl.map(|s| s.pos),
-                        self.named_show(meta),
-                    );
-                    let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
-                    rect.y -= self.scroll.pos;
+                if let Some(anchor) = self.hero_anchor(ctl, cx, meta) {
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
-                    self.content(
-                        fx,
-                        ContentReq::Panel(ContentPanel::AltSources {
-                            anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
-                        }),
-                    );
+                    self.content(fx, ContentReq::Panel(ContentPanel::AltSources { anchor }));
                 }
             }
             // The bookmark disc: the press is the item menu's own write (`Action::WatchlistAdd` /
@@ -4352,8 +4433,27 @@ impl DetailScreen {
         }
     }
 
-    fn play_hero<H: ContentLike>(&mut self, from_start: bool, fx: &mut Effects<'_, H>, meta: plx_data::metadata::MetadataView<'_>) -> bool {
+    fn play_hero<H: ContentLike>(
+        &mut self,
+        from_start: bool,
+        cx: &Cx<'_, H>,
+        fx: &mut Effects<'_, H>,
+        meta: plx_data::metadata::MetadataView<'_>,
+    ) -> bool {
         let Some(d) = self.detail(meta) else { return false };
+        // **A leaf with a real choice and no pick yet ASKS rather than guesses** — the FastPlex
+        // behaviour this picker exists for. The picker's answer starts the play
+        // (`AppMsg::VersionChosen`), so the press is not lost, and `version_ask` carries whether it
+        // was Play-from-Start. `play_versions` is the leaf the hero would actually start: a movie's
+        // own `Media[]`, or a show's hero episode's.
+        if d.play_versions().len() > 1 && !self.version_chosen {
+            if let Some(anchor) = self.hero_anchor(hero::HeroCtl::Play, cx, meta) {
+                self.version_ask = Some(from_start);
+                let current = self.clamp_version(d.play_versions());
+                self.content(fx, ContentReq::Panel(ContentPanel::Versions { anchor, current }));
+                return true;
+            }
+        }
         if d.is_show {
             let i = hero::hero_episode(d).and_then(|ep| d.episodes.position(&ep.rk));
             match i {
@@ -4366,21 +4466,32 @@ impl DetailScreen {
                 ),
             }
         } else {
-            let play = self.selected().map_or_else(
-                || PlayIntent::Item {
-                    sid: plx_media::route::item_sid(d.sid),
-                    rk: d.rk.clone(),
-                    part: d.part.clone(),
-                    vcodec: d.vcodec.clone(),
-                    acodec: d.acodec.clone(),
-                    title: d.title.clone(),
-                    context: String::new(),
-                },
+            let version = self.clamp_version(&d.versions);
+            // A version the picker chose is built from the LOADED item's own record; only version 0
+            // may take the catalog row, which carries `Media[0]`'s part and codecs.
+            let play = self.selected().filter(|_| version == 0).map_or_else(
+                || self.version_intent(d, version, String::new()),
                 |m| PlayIntent::Movie(m.clone()),
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
             self.content(fx, ContentReq::Play { play, resume_ns });
             true
+        }
+    }
+
+    /// The [`PlayIntent::Item`] for the leaf `d` at `version` — the version's own part and source
+    /// codecs where the picker holds them, else the flattened block (which IS version 0).
+    fn version_intent(&self, d: &Detail, version: usize, context: String) -> PlayIntent {
+        let v = d.versions.get(version);
+        PlayIntent::Item {
+            sid: plx_media::route::item_sid(d.sid),
+            rk: d.rk.clone(),
+            part: v.map_or_else(|| d.part.clone(), |v| v.part.clone()),
+            vcodec: v.map_or_else(|| d.vcodec.clone(), |v| v.vcodec.clone()),
+            acodec: v.map_or_else(|| d.acodec.clone(), |v| v.acodec.clone()),
+            title: d.title.clone(),
+            context,
+            version,
         }
     }
 
@@ -4411,9 +4522,13 @@ impl DetailScreen {
         // mutation, even when this particular command currently replaces only NowPlaying.
         let sid = d.sid;
         let play_rk = ep.rk.clone();
-        let part = ep.part.clone();
-        let vcodec = ep.vcodec.clone();
-        let acodec = ep.acodec.clone();
+        // The page's pick, against THIS episode's own `Media[]` (the index is per-leaf, which is
+        // what makes it mean the same thing on the hero episode and on one clicked in the strip).
+        let version = self.clamp_version(&ep.versions);
+        let v = ep.versions.get(version);
+        let part = v.map_or_else(|| ep.part.clone(), |v| v.part.clone());
+        let vcodec = v.map_or_else(|| ep.vcodec.clone(), |v| v.vcodec.clone());
+        let acodec = v.map_or_else(|| ep.acodec.clone(), |v| v.acodec.clone());
         let title = if ep.title.is_empty() {
             d.title.clone()
         } else {
@@ -4451,6 +4566,7 @@ impl DetailScreen {
             acodec,
             title,
             context,
+            version,
         };
         self.content(fx, ContentReq::Play { play, resume_ns });
         true

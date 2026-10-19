@@ -380,3 +380,118 @@ fn every_landing_of_a_deck_read_publishes_so_the_row_needs_no_epoch_of_its_own()
     assert!(moves >= 4, "the walk took {moves} moves");
     plx_plex::plex::reset_servers_for_test();
 }
+
+/// **A rating key the hub lists twice is ONE card** — the deck's own invariant ("none appears
+/// twice"), which `read_ahead` enforces on every page it appends but the PREVIEW did not. A server
+/// that repeats a row therefore drew the same poster twice on the shelf, which is the shape a
+/// "duplicated Continue Watching poster" report describes.
+#[test]
+fn a_continue_watching_row_the_server_lists_twice_draws_once() {
+    let row = |key: &str, viewed: i64| serde_json::json!({
+        "ratingKey": key, "type": "movie", "title": "Movie", "thumb": "/poster", "lastViewedAt": viewed});
+    let hub = serde_json::json!({"hubIdentifier": "continueWatching", "more": false,
+        "Metadata": [row("7", 30), row("8", 20), row("7", 10)], "totalSize": 3});
+    let cw: Container = serde_json::from_value(serde_json::json!({"Hub": [hub]})).unwrap();
+    let build = project(&Container::default(), &cw, sid(0));
+    let keys: Vec<&str> = build.cw.iter().map(|r| r.m.rk.as_str()).collect();
+    assert_eq!(keys, ["7", "8"], "the repeated key is one card, and the first listing wins");
+    assert_eq!(
+        build.cw.iter().map(|r| r.position).collect::<Vec<_>>(),
+        [0, 1],
+        "a kept row's position stays its LISTING offset, so a dropped repeat leaves a gap the \
+         window maths already tolerates"
+    );
+}
+
+/// One source's deck preview built from `(ratingKey, catalog guid, lastViewedAt)` — the three
+/// things the one-card-per-title rule reads.
+fn guid_source(slot: u16, cards: &[(&str, [u8; 12], i64)]) -> Src {
+    let mut build = SourceBuild::default();
+    build.cw = cards
+        .iter()
+        .map(|(rk, guid, viewed)| CwItem {
+            last_viewed_at: *viewed,
+            m: Arc::new(PmsMovie {
+                sid: sid(slot),
+                rk: (*rk).into(),
+                title: "Movie".into(),
+                thumb: "/poster".into(),
+                kind: 0,
+                guid: Some(*guid),
+                ..PmsMovie::default()
+            }),
+            position: 0,
+        })
+        .collect();
+    src(slot, "", HubState::Ready, Some(build))
+}
+
+fn guid_owner(mut srcs: Vec<Src>) -> Owner {
+    settle_deck(&mut srcs, false);
+    let mut owner = Owner::default();
+    seed(&mut owner.state, srcs);
+    owner
+}
+
+/// **Two ITEMS of one title on ONE server are one Continue Watching card.** Plex holds a work as
+/// several items (one per file) when the household's naming never merged them into one item's
+/// `Media[]`; the server then lists every one of them, and the shelf drew the title once per file.
+/// The first in merged order wins — the most recently viewed copy — because that is the order the
+/// deck already decided.
+#[test]
+fn two_items_of_one_title_on_one_server_are_one_continue_watching_card() {
+    let _guard = plx_base::testlock::serial();
+    plx_plex::plex::reset_servers_for_test();
+    let slot = plx_plex::plex::register_for_test("deck-guid", "127.0.0.1", 9, "synthetic", "fixture").raw();
+    let owner = guid_owner(vec![guid_source(
+        slot,
+        &[("1", [7; 12], 3000), ("2", [7; 12], 2000), ("3", [8; 12], 1000)],
+    )]);
+    assert_eq!(rks(&owner.state, 0), ["1", "3"], "one card per title, the newest copy winning");
+    plx_plex::plex::reset_servers_for_test();
+}
+
+/// **…and one title on TWO servers stays two cards.** That is the design's rule, not an oversight:
+/// merging the copies invisibly is what makes a film vanish when a friend's server goes offline,
+/// and *Also available* is the answer instead. The rule is therefore `(sid, title)`, never the
+/// title alone.
+#[test]
+fn one_title_on_two_servers_stays_two_continue_watching_cards() {
+    let _guard = plx_base::testlock::serial();
+    plx_plex::plex::reset_servers_for_test();
+    let a = plx_plex::plex::register_for_test("deck-guid-a", "127.0.0.1", 9, "synthetic", "fixture").raw();
+    let b = plx_plex::plex::register_for_test("deck-guid-b", "127.0.0.2", 10, "synthetic", "fixture").raw();
+    let owner = guid_owner(vec![
+        guid_source(a, &[("1", [7; 12], 3000)]),
+        guid_source(b, &[("1", [7; 12], 2000)]),
+    ]);
+    assert_eq!(rks(&owner.state, 0), ["1", "1"], "two servers holding one film are two cards");
+    plx_plex::plex::reset_servers_for_test();
+}
+
+/// **The title key is the LEAF's own address, not its show's.** Two copies of one episode agree;
+/// two DIFFERENT episodes of one show do not — the distinction `watchlist_subject` deliberately
+/// does not make, because "has seen an episode" is a fact about the series while "this card" is not.
+#[test]
+fn the_title_key_keys_an_episode_by_its_own_address() {
+    let ep = |season: c_int, index: c_int| PmsMovie {
+        kind: 3,
+        show_guid: Some([9; 12]),
+        season_index: season,
+        ep_index: index,
+        ..PmsMovie::default()
+    };
+    assert_eq!(ep(1, 2).title_key(), ep(1, 2).title_key(), "two copies of one episode");
+    assert_ne!(ep(1, 2).title_key(), ep(1, 3).title_key(), "a different episode");
+    assert_ne!(ep(1, 2).title_key(), ep(2, 2).title_key(), "the same number in another season");
+
+    let movie = |guid: Option<[u8; 12]>| PmsMovie { kind: 0, guid, ..PmsMovie::default() };
+    assert_eq!(movie(Some([1; 12])).title_key(), movie(Some([1; 12])).title_key());
+    assert_ne!(movie(Some([1; 12])).title_key(), movie(Some([2; 12])).title_key());
+    assert_eq!(movie(None).title_key(), None, "no portable id is not a title, and never matches one");
+    assert_eq!(
+        PmsMovie { kind: 4, ..PmsMovie::default() }.title_key(),
+        None,
+        "a collection stands for no work"
+    );
+}

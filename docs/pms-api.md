@@ -794,6 +794,11 @@ Episode entry (verified, trimmed):
 
 Note: episodes can have **multiple `Media[]` versions** (this one: 4K HDR + 1080p).
 The picker must iterate `Media[]` and choose by codec/resolution, not take `[0]` blindly.
+The client does this in `screens::versions` (opened by the Detail hero's *Versions* pill, and by a
+first Play on a multi-version item): `plx_data::metadata::Detail::versions` holds one
+`MediaVersion` per `Media[]` in server order, and a chosen index travels on
+`PlayIntent::Item::version` so the resolve reads that version's own streams, frame size and Dolby
+Vision rather than `[0]`'s. `primary_media`/`first_part` remain the version-0 shortcut.
 Episode container metadata also carries `grandparentTitle`/`grandparentThumb` at the
 `MediaContainer` level for header rendering.
 

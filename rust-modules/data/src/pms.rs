@@ -145,6 +145,31 @@ pub struct PmsMovie {
     pub child_count: i64,
 }
 
+/// **The work a card is a copy of** — [`PmsMovie::title_key`]'s answer, and the key the deck's
+/// one-card-per-title rule compares. Built from the portable ids the server sent, so it survives a
+/// `ratingKey` move.
+///
+/// An episode is keyed by its SHOW's id **plus its own address in that show**, because that is all
+/// the wire carries: an episode's own guid is `plex://episode/…`, which names no catalog title, so
+/// `show_guid` is the only portable id there is. Two copies of one episode therefore agree on all
+/// three parts, and two different episodes differ on the season or the episode number.
+///
+/// The known limit: an episode whose server sent no `parentIndex` reads [`SEASON_UNKNOWN`], so two
+/// copies of a *different* episode that also sent none, and whose numbers then coincide, would
+/// merge. That is indistinguishable on the wire, and the alternative — not merging at all — leaves
+/// the duplicated poster this exists to remove.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TitleKey {
+    /// `plex://movie/<hex>`.
+    Movie([u8; 12]),
+    /// `plex://show/<hex>`.
+    Show([u8; 12]),
+    /// A season: its show's id and the season number.
+    Season([u8; 12], c_int),
+    /// An episode: its show's id, the season number and the episode number.
+    Episode([u8; 12], c_int, c_int),
+}
+
 impl PmsMovie {
     /// **The Watchlist title this row stands for**, as `(kind, catalog id, from_episode)`: a movie or
     /// a show is itself, a season or an episode is its SHOW (`from_episode`, so the labels say
@@ -157,6 +182,35 @@ impl PmsMovie {
             0 => Some((Kind::Movie, self.guid, false)),
             1 => Some((Kind::Show, self.guid, false)),
             2 | 3 => Some((Kind::Show, self.show_guid, true)),
+            _ => None,
+        }
+    }
+
+    /// **The WORK this card is a copy of** — the identity two rows share when the server lists one
+    /// title as more than one item.
+    ///
+    /// Plex holds one work as one item with several `Media[]` when its files are named to merge,
+    /// and then the server lists it ONCE and this is never asked. But when the household holds the
+    /// files as separate items (`ratingKey`s of their own, one per file) every one of them is a row
+    /// of its own — and a shelf that draws them all shows one title several times. That is not the
+    /// same defect as a repeated key (those rows are genuinely distinct and the deck keeps them);
+    /// it is one work drawn many times, which is what the deck's `(sid, title)` rule answers.
+    ///
+    /// **Deliberately NOT [`Self::watchlist_subject`], which looks like it would do.** That answers
+    /// "which TITLE does the Watchlist take" — for an episode, its SHOW — because having seen *an*
+    /// episode is a fact about the series. Here the question is which WORK the card stands for, and
+    /// two DIFFERENT episodes of one show are two works a viewer must still be able to reach; only
+    /// two copies of the SAME episode may collapse. So the key is the leaf's own address.
+    ///
+    /// `None` when the row carries no portable id (an unmatched item, a collection). `None` never
+    /// matches `None`: two rows whose ids the server did not send are NOT merged, because a wrong
+    /// merge hides a real item.
+    pub fn title_key(&self) -> Option<TitleKey> {
+        match self.kind {
+            0 => self.guid.map(TitleKey::Movie),
+            1 => self.guid.map(TitleKey::Show),
+            2 => self.show_guid.map(|g| TitleKey::Season(g, self.season_index)),
+            3 => self.show_guid.map(|g| TitleKey::Episode(g, self.season_index, self.ep_index)),
             _ => None,
         }
     }
@@ -1677,18 +1731,42 @@ fn project_deck(out: &mut SourceBuild, cw: &plx_plex::plex::MediaContainer, sid:
     // pair, this shelf would keep drawing a card the server had been told to hide, and the context
     // menu's Remove row would look broken while the server had done exactly as asked.
     for hub in cw.hub.iter() {
+        // **A repeated `ratingKey` is ONE card**, exactly as `read_ahead` insists while it extends
+        // the lane. The dedicated hub normally lists an item once, but a server CAN repeat one —
+        // and the shelf this feeds is the one whose module doc promises "none appears twice", so
+        // the preview may not be the one place that breaks the rule (it was: the dedup lived only
+        // in the reads that extend the preview, so a repeated row showed twice on the FIRST
+        // screenful and vanished once the user scrolled). The kept row's `position` stays its
+        // LISTING offset (`head`/`tail`/`total` are offsets into that listing), so a dropped repeat
+        // leaves a gap the window maths already tolerates — `read_ahead` leaves the same ones.
+        let mut seen = std::collections::HashSet::new();
+        let mut repeats = 0usize;
         out.cw = hub
             .metadata
             .iter()
             .enumerate()
             .filter_map(|(position, it)| {
-                shelf_card(it, sid).map(|m| CwItem {
+                let m = shelf_card(it, sid)?;
+                if !seen.insert(m.rk.clone()) {
+                    repeats += 1;
+                    return None;
+                }
+                Some(CwItem {
                     last_viewed_at: it.last_viewed_at,
                     m: Arc::new(m),
                     position,
                 })
             })
             .collect();
+        if repeats > 0 {
+            // Said out loud because it is the difference between "the server lists this title
+            // twice" and "the client drew it twice" — the first thing to know when a shelf looks
+            // duplicated.
+            plx_base::eventlog::log(&format!(
+                "deck: source {} listed {repeats} continue-watching row(s) repeating an earlier ratingKey; one card kept per key",
+                sid.raw()
+            ));
+        }
         if !out.cw.is_empty() {
             // The preview is the head of the listing behind `/hubs/continueWatching/items`; the
             // lane remembers where it ends so the deck can read on from there.
@@ -1973,6 +2051,37 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
             cw.sort_by(|a, b| b.1.last_viewed_at.cmp(&a.1.last_viewed_at));
             (cw, 0, false)
         };
+    // **One card per title, per server.** Plex can hold one work as several ITEMS — the same film
+    // or episode present as separate `ratingKey`s, one per file, because the household's naming
+    // never merged them into one item's `Media[]` — and the server then lists every one of them in
+    // Continue Watching. Those rows are genuinely distinct (distinct keys, distinct positions), so
+    // the deck's own key rule does not touch them: it is one TITLE drawn as many times. The first
+    // card in merged order wins, i.e. the most recently viewed copy, because that is the order the
+    // deck already decided and this must not invent a second one.
+    //
+    // **Scoped to ONE server, deliberately.** Two servers holding one film are two cards, and that
+    // is the design's rule rather than an oversight: merging the copies invisibly is what makes a
+    // film vanish when a friend's server goes offline, and *Also available*
+    // (`screens::alt_sources`) is the answer instead. So the key is `(sid, title)`, never the title
+    // alone — and a `title_key` of `None` (an unmatched item) is never merged with anything.
+    let mut seen: Vec<(ServerId, TitleKey)> = Vec::new();
+    let mut merged = 0usize;
+    cw.retain(|(_, c)| {
+        let Some(key) = c.m.title_key() else { return true };
+        if seen.iter().any(|(sid, k)| *sid == c.m.sid && *k == key) {
+            merged += 1;
+            return false;
+        }
+        seen.push((c.m.sid, key));
+        true
+    });
+    if merged > 0 {
+        // Said out loud for the same reason the repeated-key line is: it is the difference between
+        // "the server lists this title as several items" and "the client drew it several times".
+        plx_base::eventlog::log(&format!(
+            "deck: {merged} continue-watching card(s) were another item of a title already shown on the same server; one card kept per title"
+        ));
+    }
     cw.truncate(MAX_SHELF_ITEMS);
     for (h, c) in &cw {
         new_cat.push(Arc::clone(&c.m));

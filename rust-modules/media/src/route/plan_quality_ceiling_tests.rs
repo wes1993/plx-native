@@ -339,14 +339,14 @@ fn a_trailer_play_judges_the_extra_file_not_the_parent_or_zero() {
         }],
         ..Default::default()
     };
-    assert_eq!(resolve_src_kbps(Some(&movie), a, "7"), 40_000);
+    assert_eq!(resolve_src_kbps(Some(&movie), a, "7", 0), 40_000);
     assert_eq!(
-        resolve_src_kbps(Some(&movie), a, "9"),
+        resolve_src_kbps(Some(&movie), a, "9", 0),
         2_500,
         "the extra's own rate, not the feature's"
     );
     assert_eq!(
-        resolve_src_kbps(Some(&movie), a, "8"),
+        resolve_src_kbps(Some(&movie), a, "8", 0),
         0,
         "an unrelated key is still unmeasured"
     );
@@ -380,10 +380,10 @@ fn the_source_rate_is_the_video_streams_own_where_the_server_gave_one() {
         }),
         ..Default::default()
     };
-    assert_eq!(source_kbps(&with_video), 7900);
+    assert_eq!(source_kbps(&with_video, 0), 7900);
     // …which is what keeps it under an 8 Mbps rung its VIDEO does in fact fit
     assert!(
-        quality_policy(Quality::P1080, false, source_kbps(&with_video), 1920, 1080).direct_play
+        quality_policy(Quality::P1080, false, source_kbps(&with_video, 0), 1920, 1080).direct_play
     );
     assert!(
         !quality_policy(Quality::P1080, false, with_video.bitrate, 1920, 1080).direct_play,
@@ -395,15 +395,15 @@ fn the_source_rate_is_the_video_streams_own_where_the_server_gave_one() {
         bitrate: 8540,
         ..Default::default()
     };
-    assert_eq!(source_kbps(&bare), 8540);
+    assert_eq!(source_kbps(&bare, 0), 8540);
     // a video record PMS gave no bitrate for is not a measurement of 0 — fall back
     let unmeasured_stream = plx_data::metadata::Detail {
         bitrate: 8540,
         video: Some(plx_data::metadata::Stream::default()),
         ..Default::default()
     };
-    assert_eq!(source_kbps(&unmeasured_stream), 8540);
+    assert_eq!(source_kbps(&unmeasured_stream, 0), 8540);
     // nothing said at all stays 0, which `Ceiling::admits` fails closed on
-    assert_eq!(source_kbps(&plx_data::metadata::Detail::default()), 0);
+    assert_eq!(source_kbps(&plx_data::metadata::Detail::default(), 0), 0);
 }
 

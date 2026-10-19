@@ -64,6 +64,9 @@ pub fn pill_w(measure: &dyn Measure, label: &CStr, sz: i32, icon: bool, trailing
 #[derive(Clone, Copy, Debug)]
 pub struct HeroWidths {
     pub pill: f32,
+    /// The *Versions* pill's width — the version picker's opener, drawn only when the item carries
+    /// more than one `Media[]` version. A second variable-width pill beside [`Self::alt`].
+    pub versions: f32,
     pub alt: f32,
     /// the three discs, in the page's disc slot order, each already unfurled
     pub disc: [f32; 3],

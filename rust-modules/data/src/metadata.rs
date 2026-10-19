@@ -91,8 +91,12 @@ impl<'a> MetadataView<'a> {
     pub fn detail_generation(&self) -> u32 {
         detail_generation(self.adapter)
     }
-    pub fn cached_playing(&self, sid: plx_plex::plex::ServerId, rk: &str) -> Option<PlayingItem> {
-        cached_playing(self.state, sid, rk)
+    /// The loaded detail's streams when it IS this item, so playing from a detail page costs no
+    /// GET. `version` selects which `Media[]` entry the play is against: 0 is the version
+    /// [`Detail`]'s flattened block describes, and any other index reads that version's own
+    /// streams — a chosen version must never be handed version 0's track list or frame size.
+    pub fn cached_playing(&self, sid: plx_plex::plex::ServerId, rk: &str, version: usize) -> Option<PlayingItem> {
+        cached_playing(self.state, sid, rk, version)
     }
     pub fn active_marker(&self, head: Playhead) -> Option<Marker> {
         if !head.playing {
@@ -989,6 +993,12 @@ pub struct Episode {
     pub rating: String,
     pub vcodec: String, // Media[0].videoCodec (for the direct-play/transcode decision)
     pub acodec: String, // Media[0].audioCodec
+    /// Every `Media[]` version this episode carries, in server order — the filmstrip's Play and the
+    /// version picker read it exactly as a movie's [`Detail::versions`] is read. Empty when the
+    /// server sent one version (the ordinary case), and not serialized while empty so committed
+    /// recordings stay canonical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<MediaVersion>,
 }
 
 /// One slot per [`Spot`] section id. Section 6 is extras, 7 the collection shelf. Do not shrink
@@ -1592,6 +1602,62 @@ fn convert_ratings(it: &plx_plex::plex::Metadata) -> Vec<Rating> {
     out
 }
 
+/// **One of an item's `Media[]` versions** — a version picker's row and the play path's target.
+///
+/// Plex collapses several files of one title into ONE item with several `Media[]` entries
+/// (`docs/pms-api.md` §4: the dev library really does hold a 4K HDR and a 1080p cut of one
+/// episode, and two 4K cuts of another at different bitrates). Every technical field [`Detail`]
+/// carries flattened describes **version 0** (`plex::Metadata::primary_media`); this record is the
+/// same block for ONE version, so the picker can list them and a chosen one can be played without
+/// the routing reading another version's streams — the silent-substitution failure this store's
+/// `(sid, rk)` identity test exists to stop, one axis over.
+///
+/// `Detail::versions` holds one per `Media[]`, in server order, so index 0 IS the version
+/// [`Detail`]'s own flattened fields describe.
+#[derive(Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct MediaVersion {
+    /// `Media[n].Part[0].key` — what the play path hands `route::request_play`.
+    pub part: String,
+    /// `Media[n].videoCodec` / `audioCodec` — the source codecs the direct-play gate reads.
+    pub vcodec: String,
+    pub acodec: String,
+    /// `Media[n].videoResolution` — PMS's coarse class ("4k" / "1080" / "720" / "sd").
+    pub video_resolution: String,
+    pub width: i64,
+    pub height: i64,
+    /// `Media[n].bitrate` in kbps (the whole stream, audio included).
+    pub bitrate: i64,
+    /// `Part[0].container`, falling back to `Media[n].container`.
+    pub container: String,
+    /// `Part[0].file` — the absolute path ON THE SERVER. The row's descriptive line; not a URL.
+    pub file: String,
+    /// `Part[0].size` in bytes (0 = the server did not say).
+    pub size: i64,
+    #[serde(with = "record::float_bits")]
+    pub aspect_ratio: f64,
+    /// The version's video `Stream`, whole — its own bitrate/profile/colour record.
+    pub video: Option<Stream>,
+    /// The version's audio and subtitle tracks, so a play of THIS version gets its own track menu
+    /// and its own direct-playable audio pick rather than version 0's.
+    pub audio: Vec<Stream>,
+    pub subs: Vec<Stream>,
+    #[serde(with = "record::float_bits")]
+    pub video_fps: f64,
+    /// The version's video stream is HDR (PQ/HLG transfer, or Dolby Vision).
+    pub hdr: bool,
+    /// The version's Dolby Vision layering — the direct-play gate's other refusal, per version.
+    pub dovi: Dovi,
+}
+
+impl MediaVersion {
+    /// Does this version name a file the pipeline could open? A `Media[]` entry with no `Part[]`
+    /// (a metadata-only version) has no `key` and cannot be played.
+    pub fn playable(&self) -> bool {
+        !self.part.is_empty()
+    }
+}
+
 #[derive(Default, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Detail {
@@ -1651,11 +1717,22 @@ pub struct Detail {
     pub part: String,   // Media[0].Part[0].key for a leaf (movie/episode); empty for a show
     pub vcodec: String, // Media[0].videoCodec (drives the direct-play/transcode decision)
     pub acodec: String, // Media[0].audioCodec
+    /// **Every `Media[]` version this item carries**, in server order — the version picker's list
+    /// and the play path's target when the viewer picks one. Index 0 is the version the flattened
+    /// `part`/`vcodec`/`video_resolution`/… block below describes ([`MediaVersion`]), so a viewer
+    /// who never opens the picker plays exactly what the client always did.
+    ///
+    /// EMPTY for a container with no `Media[]` of its own (a show — its episodes carry the
+    /// versions) and for any item whose server sent none. Not serialized while empty, so the
+    /// committed replay recordings (which predate it) still round-trip canonically
+    /// (`record::validate`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<MediaVersion>,
     #[serde(with = "record::float_bits")]
     pub video_fps: f64, // video Stream frameRate (0 = unknown); feeds the Load esInfo
     // ---- the PRIMARY version's technical fields (plex::Metadata::primary_media = Media[0], NOT a
-    // best-of pick — a multi-version item has more, and choosing among them needs a version picker
-    // that does not exist yet). For a SHOW these are borrowed from its first episode, like the
+    // best-of pick — a multi-version item has more, and choosing among them is
+    // `screens::versions`, which reads `versions` above). For a SHOW these are borrowed from its first episode, like the
     // About footer's audio/subtitle lists. `bitrate`/`width`/`height` are unused by the UI today
     // and carried for the video-quality ladder ("26.1 Mbps 4K (Original)").
     pub video_resolution: String, // "4k" | "1080" | "720" | "sd" — the hero's media badge
@@ -1771,6 +1848,44 @@ impl Detail {
     /// Detail's seven layout reads asked before the page's own item had landed.
     pub fn has_own_file(&self) -> bool {
         !self.part.is_empty()
+    }
+
+    /// **Has this show been started AT ALL?** PMS puts `S1E1 off=0` on deck for a show nobody has
+    /// touched, so "there is something on deck" is not the same question as "this show is
+    /// underway". The hero's Play control is about the SERIES until this is true, and about the
+    /// on-deck episode after. The rule lives on the DATA so the detail hero and the version picker
+    /// (`Detail::play_versions`) cannot answer it two ways; it was `screens::detail::hero`'s.
+    pub fn show_started(&self) -> bool {
+        self.on_deck.as_ref().map(|e| e.resume_ms > 0).unwrap_or(false)
+            || self.seasons.iter().any(|s| s.viewed_leaf_count > 0)
+    }
+
+    /// The episode a show's hero is ABOUT — the server's on-deck episode, once the show has
+    /// actually been started. `None` means the hero presents the SERIES instead (finished, or
+    /// never opened), and `None` for any non-show.
+    pub fn hero_episode(&self) -> Option<&Episode> {
+        let ep = self.on_deck.as_ref()?;
+        self.show_started().then_some(ep)
+    }
+
+    /// **The `Media[]` versions of whatever this page's Play would START**, in server order.
+    ///
+    /// For a leaf (a movie, or an episode opened on its own page) that is the item's own
+    /// [`Self::versions`]. For a SHOW it is the hero episode's — the episode the Play control is
+    /// about — which is why this is the accessor the version picker and the hero's *Versions* gate
+    /// both read rather than `versions` directly: a show container carries no `Media[]` of its own,
+    /// so reading `versions` there would report "no choice" on a page that plainly has one.
+    ///
+    /// Mirrors [`Detail::hero_episode`]'s fallback: a show whose hero presents the series plays its
+    /// first episode, so that episode's versions are the ones on offer.
+    pub fn play_versions(&self) -> &[MediaVersion] {
+        if !self.is_show {
+            return &self.versions;
+        }
+        self.hero_episode()
+            .or_else(|| self.episodes.first())
+            .map(|ep| ep.versions.as_slice())
+            .unwrap_or(&[])
     }
 
     /// The extras row whose rating key is `rk`, if this detail carries it.
@@ -2305,6 +2420,8 @@ fn fetch_detail(sid: plx_plex::plex::ServerId, rk: &str) -> Option<(Detail, Stri
         part: it.first_part().map(|p| p.key.clone()).unwrap_or_default(),
         vcodec: media0.map(|m| m.video_codec.clone()).unwrap_or_default(),
         acodec: media0.map(|m| m.audio_codec.clone()).unwrap_or_default(),
+        // every Media[] version, in server order (index 0 mirrors the flattened block above)
+        versions: it.media.iter().map(convert_media_version).collect(),
         video_fps: 0.0, // set from the video Stream by parse_streams below
         // likewise set by parse_streams (one assignment point), which for a SHOW runs a second
         // time over its first episode — the show container carries no Media of its own
@@ -2698,46 +2815,68 @@ impl PlayingItem {
 /// This closed a TODO that stood here through the foundation commits: `Detail` had no server, so
 /// the filter was the rk alone and the parameter was deliberately unused. `Detail.sid` is what
 /// made the pair test possible.
-fn cached_playing(state: &MetadataState, sid: plx_plex::plex::ServerId, rk: &str) -> Option<PlayingItem> {
+fn cached_playing(state: &MetadataState, sid: plx_plex::plex::ServerId, rk: &str, version: usize) -> Option<PlayingItem> {
     // Once the item has played, the server's selection may have moved under the page's copy; the
     // start planned from it would PUT a stale subtitle pick over the server's (see the field).
     if state.played_since_load.as_ref().is_some_and(|(s, r)| plx_plex::plex::same_item((*s, r), (sid, rk))) {
         return None;
     }
-    current(state)
-        .filter(|d| plx_plex::plex::same_item((d.sid, &d.rk), (sid, rk)) && !d.audio.is_empty())
-        .map(|d| PlayingItem {
-            sid,
-            rk: rk.to_string(),
-            show_rk: d.show_rk.clone(),
-            kind: d.kind.clone(),
-            audio: d.audio.clone(),
-            subs: d.subs.clone(),
-            video_fps: d.video_fps,
-            width: d.width,
-            height: d.height,
-            bitrate: d.bitrate,
-            dovi: d.dovi,
-            markers: d.markers.clone(),
-            chapters: d.chapters.clone(),
-            hdr: d.hdr,
-        })
+    let d = current(state).filter(|d| plx_plex::plex::same_item((d.sid, &d.rk), (sid, rk)))?;
+    playing_item_of_detail(d, sid, rk, version)
+}
+
+/// The loaded `Detail`'s own streams, for the `version` the play is against.
+///
+/// **Version 0 reads [`Detail`]'s flattened block; any other index reads that [`MediaVersion`]'s
+/// record.** That is what keeps a chosen version's track list, frame size, fps and Dolby Vision
+/// from being version 0's — the same silent-substitution class the `(sid, rk)` hit test guards.
+/// `None` means "the detail cannot answer for this version" (no streams for it, or an index it has
+/// no record of), and the caller then pays the one PMS GET.
+fn playing_item_of_detail(d: &Detail, sid: plx_plex::plex::ServerId, rk: &str, version: usize) -> Option<PlayingItem> {
+    let v = match d.versions.get(version) {
+        Some(v) => Some(v),
+        // version 0 is the flattened block below; an index we hold no record of is a miss
+        None if version == 0 => None,
+        None => return None,
+    };
+    let audio = v.map_or_else(|| d.audio.clone(), |v| v.audio.clone());
+    if audio.is_empty() {
+        return None;
+    }
+    Some(PlayingItem {
+        sid,
+        rk: rk.to_string(),
+        show_rk: d.show_rk.clone(),
+        kind: d.kind.clone(),
+        audio,
+        subs: v.map_or_else(|| d.subs.clone(), |v| v.subs.clone()),
+        video_fps: v.map_or(d.video_fps, |v| v.video_fps),
+        width: v.map_or(d.width, |v| v.width),
+        height: v.map_or(d.height, |v| v.height),
+        bitrate: v.map_or(d.bitrate, |v| v.bitrate),
+        dovi: v.map_or(d.dovi, |v| v.dovi),
+        markers: d.markers.clone(),
+        chapters: d.chapters.clone(),
+        hdr: v.map_or(d.hdr, |v| v.hdr),
+    })
 }
 
 /// `sid` names the server `rk` is a key on. It runs on the resolve worker, so the server must
 /// arrive by value: `client_opt()` here would fetch whichever server is CURRENT, and a ratingKey
-/// that also exists there would come back with a different film's stream list.
-pub fn fetch_playing_item(sid: plx_plex::plex::ServerId, rk: &str) -> Option<PlayingItem> {
+/// that also exists there would come back with a different film's stream list. `version` selects
+/// which `Media[]` entry the play is against (0 = the item's own `Media[0]`).
+pub fn fetch_playing_item(sid: plx_plex::plex::ServerId, rk: &str, version: usize) -> Option<PlayingItem> {
     if rk.is_empty() {
         return None;
     }
     let it = plx_plex::plex::client_for(sid).and_then(|c| c.metadata(rk));
-    Some(playing_item_from(sid, rk, it.as_ref()))
+    Some(playing_item_from(sid, rk, it.as_ref(), version))
 }
 
 /// The conversion half of [`fetch_playing_item`], pure so the parse is testable without a server:
-/// the played item's streams, markers, chapters, frame size and type, given the server's item.
-fn playing_item_from(sid: plx_plex::plex::ServerId, rk: &str, it: Option<&plx_plex::plex::Metadata>) -> PlayingItem {
+/// the played item's streams, markers, chapters, frame size and type, given the server's item and
+/// the `Media[]` `version` the play is against.
+fn playing_item_from(sid: plx_plex::plex::ServerId, rk: &str, it: Option<&plx_plex::plex::Metadata>, version: usize) -> PlayingItem {
     // Markers and chapters hang off the ITEM, streams off its first Part — so a part-less response
     // still yields both of those instead of discarding all three. `Client::metadata` already sends
     // `includeChapters=1` (plex/library.rs), so the Chapter[] is on the wire either way: taking it
@@ -2750,21 +2889,21 @@ fn playing_item_from(sid: plx_plex::plex::ServerId, rk: &str, it: Option<&plx_pl
         .as_ref()
         .map(|it| convert_chapters(&it.chapter))
         .unwrap_or_default();
-    let st = it
-        .as_ref()
-        .and_then(|it| it.first_part().map(|p| convert_streams(&p.stream)))
+    // The version the play is against: `media[version]` (0 IS `primary_media`, and its first Part
+    // IS `first_part`), so the streams and the frame size below describe the SAME file the play
+    // was asked for — a chosen version must never be handed another version's tracks or resolution.
+    let media = it.and_then(|it| it.media.get(version));
+    let st = media
+        .and_then(|m| m.part.first().map(|p| convert_streams(&p.stream)))
         .unwrap_or_default();
     let (audio, subs, video_fps, dovi, hdr) = (st.audio, st.subs, st.fps, st.dovi, st.hdr);
     let show_rk = it
         .as_ref()
         .map(|it| it.grandparent_rating_key.clone())
         .unwrap_or_default();
-    // the frame size rides the same PRIMARY version the streams come from (route.rs's
-    // direct-play gate tests it against the device bound — see the field doc)
-    let (width, height, bitrate) = it
-        .as_ref()
-        .and_then(|it| it.primary_media().map(|m| (m.width, m.height, m.bitrate)))
-        .unwrap_or((0, 0, 0));
+    // the frame size rides the same version the streams come from (route.rs's direct-play gate
+    // tests it against the device bound — see the field doc)
+    let (width, height, bitrate) = media.map(|m| (m.width, m.height, m.bitrate)).unwrap_or((0, 0, 0));
     let kind = it.map(|it| it.kind.clone()).unwrap_or_default();
     PlayingItem {
         sid,
@@ -3323,6 +3462,37 @@ fn convert_episode(x: &plx_plex::plex::Metadata) -> Episode {
         rating: x.content_rating.clone(),
         vcodec: media0.map(|m| m.video_codec.clone()).unwrap_or_default(),
         acodec: media0.map(|m| m.audio_codec.clone()).unwrap_or_default(),
+        versions: x.media.iter().map(convert_media_version).collect(),
+    }
+}
+
+/// One `Media[]` entry → a [`MediaVersion`]. PURE, so the picker's rows and the play path's stream
+/// source are host-testable without a server. The PART's container wins where it has one, matching
+/// [`parse_streams`]'s rule for the primary version.
+fn convert_media_version(m: &plx_plex::plex::Media) -> MediaVersion {
+    let part = m.part.first();
+    let streams = part.map(|p| convert_streams(&p.stream)).unwrap_or_default();
+    MediaVersion {
+        part: part.map(|p| p.key.clone()).unwrap_or_default(),
+        vcodec: m.video_codec.clone(),
+        acodec: m.audio_codec.clone(),
+        video_resolution: m.video_resolution.clone(),
+        width: m.width,
+        height: m.height,
+        bitrate: m.bitrate,
+        container: part
+            .filter(|p| !p.container.is_empty())
+            .map(|p| p.container.clone())
+            .unwrap_or_else(|| m.container.clone()),
+        file: part.map(|p| p.file.clone()).unwrap_or_default(),
+        size: part.map(|p| p.size).unwrap_or(0),
+        aspect_ratio: m.aspect_ratio,
+        video: streams.video,
+        audio: streams.audio,
+        subs: streams.subs,
+        video_fps: streams.fps,
+        hdr: streams.hdr,
+        dovi: streams.dovi,
     }
 }
 

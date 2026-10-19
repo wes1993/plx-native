@@ -1059,6 +1059,11 @@ pub enum ContentPanel {
     /// *Also available* (`screens::alt_sources`), anchored to the drawn rect of the pill that
     /// opened it — bit-preserving, so a canonical argument holds it without float equality.
     AltSources { anchor: [u32; 4] },
+    /// *Versions* (`screens::versions`), the same anchored `Style::Compact` menu off the hero's
+    /// *Versions* pill — or off the Play pill, when a first Play on a multi-version item opens it
+    /// rather than guessing. It lists the item's `Media[]` and reports the pick. `current` is the
+    /// version the page is on NOW: the panel's tick, carried because only the page knows it.
+    Versions { anchor: [u32; 4], current: usize },
     /// *Track information* (`screens::tracks_panel`), opened at 1-based `page`. Every interactive
     /// opening passes 1; `/tmp/plxnative-tracks=<n>` is the only caller that does not, and it is
     /// what makes a headless capture of page 2 possible at all.
@@ -1110,6 +1115,19 @@ impl ContentPanel {
                     }),
                 )
             }
+            Self::Versions { anchor, current } => {
+                let (sid, rk) = subject?;
+                (
+                    Style::Compact,
+                    AppArg::Versions(crate::versions::VersionPickerArg {
+                        host,
+                        sid,
+                        rk: rk.to_string(),
+                        current,
+                        anchor,
+                    }),
+                )
+            }
             Self::Tracks { page } => (
                 Style::Alert,
                 AppArg::TracksPanel(crate::tracks_panel::TracksPanelArg { page }),
@@ -1139,6 +1157,11 @@ pub enum PlayIntent {
         acodec: String,
         title: String,
         context: String,
+        /// **Which `Media[]` version to play** — the version picker's choice
+        /// (`screens::versions`), 0 for every caller with no picker (a trailer, a deck play). It
+        /// travels with the item so the resolve judges the picked file by its own streams and
+        /// source rate rather than the item's first version.
+        version: usize,
     },
     /// The alternative source the page had selected (`route::request_play_movie`). Owned rather
     /// than a `&'static` catalog borrow: it is held inside `PageAction`/`AppFx` across a frame
@@ -1253,6 +1276,10 @@ pub enum AppMsg {
     /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
     /// what keeps "what a press means on the Detail page" in one place instead of two.
     AltSourceOpen(ContentArg),
+    /// The *Versions* surface committed a row: the page remembers `index` and plays that version.
+    /// The SURFACE names WHICH and the PAGE plays, [`AltSourceOpen`](Self::AltSourceOpen)'s shape —
+    /// the panel cannot start a playback (`route::request_play` takes the session's `&mut`).
+    VersionChosen { index: usize },
 }
 
 /// What the consent machine is told (§2.3): a person's answer to both questions at once.
@@ -1662,6 +1689,10 @@ pub enum AppArg {
     /// rect of the pill it hangs off — is on the argument, `LibraryMenuArg`'s shape and for the
     /// same reason: the entry outlives any one frame's idea of where that pill was.
     AltSources(crate::alt_sources::AltSourcesArg),
+    /// The Detail page's *Versions* picker (`screens::versions`), its sibling above in every way:
+    /// an anchored `Style::Compact` menu whose whole subject travels on the argument, opened off
+    /// the *Versions* pill (or the Play pill, for a first play on a multi-version item).
+    Versions(crate::versions::VersionPickerArg),
     /// The Detail page's *Track information* sheet (§6.2's page-owned panels). It carries only the
     /// 1-based PAGE the sheet opens at — a boot address like `Settings`'s root, not an identity —
     /// because the sheet describes `metadata::current()` and the host it is presented over is the
@@ -1720,6 +1751,7 @@ pub enum AppArg {
 pub const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Watchlist,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str},Catalog{hex:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Privacy,Legal,About,Document(u8),Preview(u8),ConsentStage(u8),Language,Contribute},FirstRunConsent(u8),LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
+     Versions{host:u32,sid:u32,rk:str,current:u32,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32},Catalog{state:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool,catalog:Option<{guid:str}>},\
@@ -1731,6 +1763,10 @@ impl LogicalState for AppArg {
             Self::LibraryMenu(arg) => { c.u32(4); arg.write(c); }
             Self::PlayerOverlay(arg) => { c.u32(5); arg.write(c); }
             Self::AltSources(arg) => { c.u32(6); arg.write(c); }
+            // 14, after the Watchlist menu's 13: a canon tag is a surface's identity in a recorded
+            // state, so a retired or reallocated one would make two surfaces indistinguishable in
+            // a replay. Allocated forward.
+            Self::Versions(arg) => { c.u32(14); arg.write(c); }
             Self::TracksPanel(arg) => { c.u32(7); arg.write(c); }
             // 10, after the two menus' 8 and 9: a canon tag is a surface's identity in a recorded
             // state, so a retired or reallocated one would make two surfaces indistinguishable in
@@ -1789,6 +1825,7 @@ impl plx_ui::screen::ScreenArg for AppArg {
             | AppArg::WatchlistMenu(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::AltSources(_)
+            | AppArg::Versions(_)
             | AppArg::TracksPanel(_)
             | AppArg::AboutPanel
             | AppArg::PersonBio
@@ -1803,6 +1840,9 @@ impl plx_ui::screen::ScreenArg for AppArg {
             // think it is holding two of them.
             AppArg::PlayerOverlay(_) => 16,
             AppArg::AltSources(_) => 17,
+            // 28, forward of the Catalog page's 27: ids are allocated forward, so a retired
+            // identity is never handed to the screen that replaced it.
+            AppArg::Versions(_) => 28,
             AppArg::TracksPanel(_) => 18,
             // 21, not a vacated id: allocated forward, so a retired identity is never handed to
             // the screen that replaced it.
@@ -1946,6 +1986,9 @@ where
             ),
             AppArg::AltSources(arg) => Box::new(
                 crate::alt_sources::AltSourcesScreen::new(entry, arg.clone(), H::metadata(cx)),
+            ),
+            AppArg::Versions(arg) => Box::new(
+                crate::versions::VersionPickerScreen::new(entry, arg.clone(), H::metadata(cx)),
             ),
             AppArg::TracksPanel(arg) => Box::new(
                 crate::tracks_panel::TracksPanelScreen::new(entry, *arg),
@@ -2122,6 +2165,13 @@ pub fn every_surface_arg() -> Vec<AppArg> {
             rk: "1".into(),
             anchor: [0; 4],
         }),
+        AppArg::Versions(crate::versions::VersionPickerArg {
+            host: plx_machine::machine::InstanceId(1),
+            sid: plx_plex::plex::ServerId::UNSET,
+            rk: "1".into(),
+            current: 0,
+            anchor: [0; 4],
+        }),
         AppArg::TracksPanel(crate::tracks_panel::TracksPanelArg { page: 1 }),
         AppArg::AboutPanel,
         AppArg::PersonBio,
@@ -2138,6 +2188,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::ItemMenu(_)
             | AppArg::WatchlistMenu(_)
             | AppArg::AltSources(_)
+            | AppArg::Versions(_)
             | AppArg::TracksPanel(_)
             | AppArg::AboutPanel
             | AppArg::PersonBio
@@ -2205,6 +2256,8 @@ pub const SCREEN_SHAPES: &[&str] = &[
     crate::player::overlay::SHAPE,
     crate::alt_sources::SHAPE[0],
     crate::alt_sources::SHAPE[1],
+    crate::versions::SHAPE[0],
+    crate::versions::SHAPE[1],
     crate::tracks_panel::SHAPE,
     crate::about_panel::SHAPE,
     crate::person_bio::SHAPE,
@@ -2358,7 +2411,12 @@ pub const SCREEN_SHAPES: &[&str] = &[
 // Merged tree (origin/main's scrub click-to-confirm and Home-hero successor into the Watchlist
 // branch): both sides' shape changes stand; the pin below is the value the pin test reported for
 // the merged tree, and the three replay fixtures were re-recorded on it.
-const SCREEN_SHAPES_PIN: u64 = 0x07c8_d161_c006_f959;
+// The version picker (`screens::versions`): `ARG_SHAPE` gains `Versions{host,sid,rk,current,anchor}`,
+// `screens::versions::SHAPE` joins the array, and `screens::detail::SHAPE` gains the page's chosen
+// `version` and whether the viewer has picked one (`version_chosen`) — both change what the Play
+// control does, so both are logical state. Re-record replay fixtures before trusting a Detail or
+// version-picker transcript; the previous pin was 0x07c8_d161_c006_f959.
+const SCREEN_SHAPES_PIN: u64 = 0x5c3f_17e5_43c9_02a0;
 
 #[cfg(test)]
 mod arg_tests {

@@ -44,6 +44,10 @@ pub const ELEM_TRAILER: u32 = 5;
 /// The bookmark disc — the Watchlist toggle. ONE identity for both faces (outline / filled): the
 /// face is membership, not a different control, so focus rides straight through a flip.
 pub const ELEM_WATCHLIST: u32 = 6;
+/// The *Versions* pill — the version picker's opener, drawn only when the item carries more than
+/// one `Media[]` version (`HeroSet::versions`). A pill rather than a disc because it is a PICKER
+/// opener like *Also available*, not a verb that acts on the item.
+pub const ELEM_VERSIONS: u32 = 7;
 
 /// The hero's one focus group. Local to this screen — nothing outside `screens::detail` ever names
 /// it — so, like `screens::profiles`'s `ROSTER_GROUP`/`FOOTER_GROUP`, any small integer would do;
@@ -73,6 +77,7 @@ fn mark_show_watched_label() -> &'static CStr { plx_platform::i18n::msg::browse_
 fn mark_show_unwatched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_show_unwatched_c() }
 fn play_from_start_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_play_start_c() }
 fn trailer_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_trailer_c() }
+pub fn versions_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_versions_c() }
 
 /// A control in the hero action row, named rather than numbered — ported verbatim from
 /// `ui/detail.rs::HeroCtl`.
@@ -86,6 +91,10 @@ pub enum HeroCtl {
     Trailer,
     /// the *Also available* pill, present only while a second pinned source holds this item
     Alt,
+    /// the *Versions* pill, present only while the item carries more than one `Media[]` version.
+    /// Opens the version picker (`screens::versions`); it is how a viewer changes the version the
+    /// Play control will use without leaving the page.
+    Versions,
     /// the ✓ face of the watched TOGGLE — worn while the item is not watched (part-watched
     /// included)
     MarkWatched,
@@ -104,6 +113,7 @@ impl HeroCtl {
             HeroCtl::Restart => ELEM_RESTART,
             HeroCtl::Trailer => ELEM_TRAILER,
             HeroCtl::Alt => ELEM_ALT,
+            HeroCtl::Versions => ELEM_VERSIONS,
             HeroCtl::MarkWatched => ELEM_MARK_WATCHED,
             HeroCtl::MarkUnwatched => ELEM_MARK_UNWATCHED,
             HeroCtl::Watchlist => ELEM_WATCHLIST,
@@ -118,6 +128,7 @@ impl HeroCtl {
             ELEM_RESTART => Some(HeroCtl::Restart),
             ELEM_TRAILER => Some(HeroCtl::Trailer),
             ELEM_ALT => Some(HeroCtl::Alt),
+            ELEM_VERSIONS => Some(HeroCtl::Versions),
             ELEM_MARK_WATCHED => Some(HeroCtl::MarkWatched),
             ELEM_MARK_UNWATCHED => Some(HeroCtl::MarkUnwatched),
             ELEM_WATCHLIST => Some(HeroCtl::Watchlist),
@@ -140,12 +151,14 @@ pub struct HeroSet {
     pub restart: bool,
     pub trailer: bool,
     pub alt: bool,
+    /// The item carries more than one `Media[]` version — the *Versions* pill exists only then.
+    pub versions: bool,
     pub mark: PosterMark,
 }
 
-/// How many controls the row can hold at most: Play + bookmark + Restart + Trailer + Alt + one
-/// watch face.
-pub const MAX_CTLS: usize = 6;
+/// How many controls the row can hold at most: Play + bookmark + Restart + Trailer + Alt +
+/// Versions + one watch face.
+pub const MAX_CTLS: usize = 7;
 
 /// The row's controls, in drawn order, for a given set. A fixed [`MAX_CTLS`]-slot array plus a
 /// live count, so no per-frame allocation. The bookmark disc (only when `set.watchlist`) is SECOND, after Play/Resume;
@@ -167,6 +180,10 @@ pub fn hero_ctls(set: HeroSet) -> ([HeroCtl; MAX_CTLS], usize) {
     }
     if set.alt {
         v[n] = HeroCtl::Alt;
+        n += 1;
+    }
+    if set.versions {
+        v[n] = HeroCtl::Versions;
         n += 1;
     }
     v[n] = if set.mark == PosterMark::Watched {
@@ -243,20 +260,16 @@ pub fn watch_index(set: HeroSet) -> Option<usize> {
     v[..n].iter().position(|&c| c.is_watch())
 }
 
-/// Has this show been started AT ALL? PMS puts `S1E1 off=0` on deck for a show nobody has
-/// touched, so "there is something on deck" is not the same question as "this show is underway" —
-/// ported verbatim from `ui/detail.rs::show_started`.
+/// Has this show been started AT ALL? The rule is the DATA's ([`Detail::show_started`]) so the hero
+/// and the version picker cannot answer it two ways; this is the hero's spelling of it.
 pub fn show_started(d: &Detail) -> bool {
-    d.on_deck.as_ref().map(|e| e.resume_ms > 0).unwrap_or(false)
-        || d.seasons.iter().any(|s| s.viewed_leaf_count > 0)
+    d.show_started()
 }
 
-/// The episode a show's hero is ABOUT — the server's on-deck episode, once the show has actually
-/// been started. `None` means the hero presents the SERIES instead (finished, or never opened).
-/// Ported verbatim from `ui/detail.rs::hero_episode`.
+/// The episode a show's hero is ABOUT. The rule is the DATA's ([`Detail::hero_episode`]) so the
+/// hero and the version picker's [`Detail::play_versions`] name the same episode.
 pub fn hero_episode(d: &Detail) -> Option<&Episode> {
-    let ep = d.on_deck.as_ref()?;
-    show_started(d).then_some(ep)
+    d.hero_episode()
 }
 
 /// The resume position (ns) the hero's Play control would ACTUALLY apply. Ported verbatim from
@@ -379,6 +392,12 @@ pub fn alt_pill_w(measure: &dyn Measure) -> f32 {
     plx_appkit::hero_layout::pill_w(measure, alt_label(), theme::size::BODY, false, true)
 }
 
+/// The *Versions* pill's width — a picker opener like [`alt_pill_w`], measured the same way so the
+/// two pills cannot disagree about what a trailing-chevron pill costs.
+pub fn versions_pill_w(measure: &dyn Measure) -> f32 {
+    plx_appkit::hero_layout::pill_w(measure, versions_label(), theme::size::BODY, false, true)
+}
+
 /// The accumulation itself, PURE: the drawn frame of control `i` in `set`, given both pills'
 /// measured widths. Ported verbatim from `ui/detail.rs::hero_btn_rect_at`.
 pub fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect {
@@ -388,6 +407,7 @@ pub fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect 
         *slot = match c {
             HeroCtl::Play => cw.pill,
             HeroCtl::Alt => cw.alt,
+            HeroCtl::Versions => cw.versions,
             HeroCtl::Restart => cw.disc[0],
             // never labelled, so never unfurls: a circle at every instant
             HeroCtl::Watchlist => CD,
@@ -422,6 +442,7 @@ pub fn disc_caps(
         set,
         hero_pill_w(measure, set.restart),
         alt_pill_w(measure),
+        versions_pill_w(measure),
         unfurl,
         label_w,
     )
@@ -431,12 +452,13 @@ pub(super) fn disc_caps_at(
     set: HeroSet,
     pill: f32,
     alt: f32,
+    versions: f32,
     unfurl: [f32; 3],
     label_w: [f32; 3],
 ) -> [f32; 3] {
     let (_, n) = hero_ctls(set);
     plx_appkit::hero_layout::disc_caps_with(unfurl, label_w, |disc| {
-        let last = hero_btn_rect_at(set, n.saturating_sub(1), 0.0, HeroWidths { pill, alt, disc });
+        let last = hero_btn_rect_at(set, n.saturating_sub(1), 0.0, HeroWidths { pill, versions, alt, disc });
         last.x + last.w
     })
 }
@@ -454,6 +476,7 @@ pub fn hero_widths(
     HeroWidths {
         pill: hero_pill_w(measure, has_restart),
         alt: alt_pill_w(measure),
+        versions: versions_pill_w(measure),
         disc: disc_caps(measure, set, unfurl, named_show),
     }
 }
@@ -803,7 +826,7 @@ mod tests {
     }
 
     fn set_full(restart: bool, alt: bool, mark: PosterMark, trailer: bool) -> HeroSet {
-        HeroSet {
+        HeroSet { versions: false,
             watchlist: true,
             restart,
             trailer,
@@ -987,7 +1010,7 @@ mod tests {
     /// on agreeing about).
     #[test]
     fn the_row_s_controls_never_overlap_at_any_set_size() {
-        let cw = HeroWidths {
+        let cw = HeroWidths { versions: 0.0,
             pill: 200.0,
             alt: 260.0,
             disc: [CD, CD, CD],
@@ -1016,7 +1039,7 @@ mod tests {
     /// move's one difference (an empty slice) is unreachable: every set has Play and a watch face.
     #[test]
     fn the_row_geometry_matches_the_pre_move_accumulation() {
-        let cw = HeroWidths { pill: 211.0, alt: 263.0, disc: [57.0, 61.0, 67.0] };
+        let cw = HeroWidths { versions: 0.0, pill: 211.0, alt: 263.0, disc: [57.0, 61.0, 67.0] };
         let y = 13.0;
         for restart in [false, true] {
             for alt in [false, true] {
@@ -1033,6 +1056,7 @@ mod tests {
                                 w = match c {
                                     HeroCtl::Play => cw.pill,
                                     HeroCtl::Alt => cw.alt,
+                                    HeroCtl::Versions => cw.versions,
                                     HeroCtl::Restart => cw.disc[0],
                                     HeroCtl::Trailer => cw.disc[1],
                                     HeroCtl::Watchlist => CD,
@@ -1270,7 +1294,7 @@ mod tests {
 
     #[test]
     fn restart_and_the_watch_tail_are_independent() {
-        let set = HeroSet {
+        let set = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: false,
@@ -1286,14 +1310,14 @@ mod tests {
 
     #[test]
     fn the_actions_row_grows_an_also_available_control_only_for_a_second_source() {
-        let without = HeroSet {
+        let without = HeroSet { versions: false,
             watchlist: true,
             restart: false,
             trailer: false,
             alt: false,
             mark: PosterMark::None,
         };
-        let with = HeroSet {
+        let with = HeroSet { versions: false,
             watchlist: true,
             alt: true,
             ..without
@@ -1306,7 +1330,7 @@ mod tests {
     fn the_hero_row_carries_no_track_information_disc() {
         for alt in [false, true] {
             for trailer in [false, true] {
-                let set = HeroSet {
+                let set = HeroSet { versions: false,
                     watchlist: true,
                     restart: true,
                     trailer,
@@ -1434,14 +1458,14 @@ mod tests {
 
     #[test]
     fn hero_indices_mean_different_actions_in_the_two_control_sets() {
-        let compact = HeroSet {
+        let compact = HeroSet { versions: false,
             watchlist: true,
             restart: false,
             trailer: false,
             alt: false,
             mark: PosterMark::None,
         };
-        let wide = HeroSet {
+        let wide = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: false,
@@ -1457,14 +1481,14 @@ mod tests {
 
     #[test]
     fn the_actions_row_accumulates_around_a_variable_width_control() {
-        let set = HeroSet {
+        let set = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: false,
             alt: true,
             mark: PosterMark::None,
         };
-        let widths = HeroWidths {
+        let widths = HeroWidths { versions: 0.0,
             pill: 210.0,
             alt: 300.0,
             disc: [90.0, 120.0, 120.0],
@@ -1508,12 +1532,12 @@ mod tests {
                                     [e, e, 0.0],
                                     [0.0, e, e],
                                 ] {
-                                    let disc = disc_caps_at(set, PW + 62.0, 340.0, unfurl, labels);
+                                    let disc = disc_caps_at(set, PW + 62.0, 340.0, 0.0, unfurl, labels);
                                     let last = hero_btn_rect_at(
                                         set,
                                         n - 1,
                                         0.0,
-                                        HeroWidths {
+                                        HeroWidths { versions: 0.0,
                                             pill: PW + 62.0,
                                             alt: 340.0,
                                             disc,
@@ -1534,7 +1558,7 @@ mod tests {
     #[test]
     fn the_real_verbs_all_fit_the_widest_row() {
         let measure = plx_ui::fixture::FixtureMeasure;
-        let wide = HeroSet {
+        let wide = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: true,
@@ -1547,7 +1571,7 @@ mod tests {
             wide,
             n - 1,
             0.0,
-            HeroWidths {
+            HeroWidths { versions: 0.0,
                 pill: hero_pill_w(&measure, true),
                 alt: alt_pill_w(&measure),
                 disc: caps,
@@ -1558,7 +1582,7 @@ mod tests {
             "the 5-control row collapses rather than crossing People"
         );
 
-        let roomy = HeroSet {
+        let roomy = HeroSet { versions: false,
             watchlist: true,
             restart: false,
             trailer: true,
@@ -1585,7 +1609,7 @@ mod tests {
 
     #[test]
     fn a_verb_that_does_not_fit_is_dropped_whole() {
-        let set = HeroSet {
+        let set = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: true,
@@ -1625,7 +1649,7 @@ mod tests {
 
     #[test]
     fn the_widest_action_row_clears_the_people_column() {
-        let set = HeroSet {
+        let set = HeroSet { versions: false,
             watchlist: true,
             restart: true,
             trailer: true,
@@ -1637,7 +1661,7 @@ mod tests {
             set,
             n - 1,
             0.0,
-            HeroWidths {
+            HeroWidths { versions: 0.0,
                 pill: PW + 62.0,
                 alt: 340.0,
                 disc: [CD; 3],

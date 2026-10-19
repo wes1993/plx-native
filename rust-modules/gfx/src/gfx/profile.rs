@@ -117,6 +117,7 @@ mod imp {
         "dt.alt",
         "dt.bio",
         "dt.tracks",
+        "dt.versions",
         "hm.backdrop",
         "hm.grid",
         "hm.hero",

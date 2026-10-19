@@ -1,5 +1,55 @@
 # Project instructions
 
+## ⛔ SCOPE — THIS REPOSITORY ONLY (`/workspace/plx-native`)
+
+**NEVER read, modify, build, package, install, run tests in, or write to ANY other project.**
+This checkout is the only thing in scope. `/workspace` also holds unrelated projects (for example
+`fastplex-webos`) — they are OFF LIMITS, and so is every other directory on the machine.
+
+**MAI leggere, modificare, compilare, impacchettare, installare, eseguire test o scrivere in
+qualsiasi altro progetto.** Questa cartella è l'unica in ambito. Le altre cartelle in `/workspace`
+(esempio: `fastplex-webos`) sono **VIETATE**, e così ogni altra directory della macchina.
+
+This is a HARD STOP, not a preference: it outranks convenience, it outranks a task that seems to
+need the other project, and it outranks "I only need to look at it". If a request appears to
+require another project, **stop and ask** — do not look, and do not act. Even read-only inspection
+of another project needs the user's explicit, same-message permission.
+
+È uno STOP netto, non una preferenza: vale più della comodità e vale più di un compito che sembra
+richiedere l'altro progetto. Se una richiesta sembra richiederlo, **fermati e chiedi**; non
+guardare e non agire. Anche la sola lettura di un altro progetto richiede il permesso esplicito
+dell'utente, nella stessa richiesta.
+
+## TV / LG webOS — operating rules (user's, verbatim in substance)
+
+- **Devices: only the registered `ares` ones, addressed by name.** `ares-setup-device --list` is the
+  only listing command. Never invent a device name or an IP, and never use direct SSH/root.
+- **NEVER install, launch, remove or reboot an app on a TV without the user's explicit
+  authorisation in the same request** ("installa su TV-Cucina"). "Prepare the build" alone means
+  STOP at the IPK: do not install.
+- **Install on the TV the user NAMED, and never on both** unless both were named. Always state at
+  the end which TV was changed and which was not.
+- Before an install: the IPK must exist, the tests must be green, and the report must carry the
+  **version and the SHA256**.
+- Allowed: `ares-install --device NAME file.ipk`, `ares-launch --device NAME <appid>`,
+  `ares-setup-device --list` (read-only). Require an extra confirmation for `ares-install --remove`
+  and for `ares-setup-device --add/--modify/--remove`.
+- **On a failed install: STOP.** Do not retry in a loop and do not switch to the other TV.
+- Never publish, commit or attach QA credentials, `LEMON_API_KEY`, or Cloudflare secrets;
+  `LEMON_API_KEY` lives only as a Cloudflare secret and never in a file or a log.
+- **Device mapping — CONFIRMED by the user (2026-10-19): TV-Cucina = 192.168.0.35.** That matches
+  the `ares` registration (TV-Cucina → .35, TV-Camera → .36); the user's earlier written mapping
+  (TV-Cucina = .36) was a mistake. Only .35 answers. Never assume — if it ever disagrees again,
+  stop and ask.
+- **Standing instruction (user, 2026-10-19): on every change, build on GitHub Actions and `git
+  push`.** Push over SSH (this checkout's key authenticates as `wes1993`; the HTTPS remote carries
+  no credential). The fork's `CI` workflow is active, so a push to any branch runs the ARM
+  cross-build and uploads the `plxnative-<sha>` artifact.
+
+(The user's TV rules also named the app id `com.wes93.fastplexwebos` and
+`/workspace/fastplex-webos` artifacts. Those clauses belong to another project and are
+**superseded by the SCOPE rule above** — this repository only.)
+
 ## Project
 
 PlxNative is a production-quality native Plex client for rooted LG webOS 4.5 TVs. Most of the
