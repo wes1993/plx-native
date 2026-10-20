@@ -2688,6 +2688,55 @@ fn a_movie_trailer_disc_plays_the_extra_from_the_start() {
     clear();
 }
 
+/// **A pick from the *Versions* pill only CHOOSES.** The tick moves, the page stays — no playback,
+/// no navigation. Only a pick that answers a Play press (`version_ask`, armed by `play_hero`)
+/// starts the ticked version at once.
+#[test]
+fn a_pill_pick_only_moves_the_tick_while_a_play_pick_starts_playback() {
+    fn movie_version(part: &str) -> plx_data::metadata::MediaVersion {
+        plx_data::metadata::MediaVersion {
+            part: part.into(),
+            vcodec: "h264".into(),
+            acodec: "aac".into(),
+            ..Default::default()
+        }
+    }
+    let _guard = install(Detail {
+        sid: ServerId::UNSET,
+        rk: "film".into(),
+        kind: "movie".into(),
+        title: "Film".into(),
+        part: "/library/parts/1/file.mkv".into(),
+        versions: vec![
+            movie_version("/library/parts/1/file.mkv"),
+            movie_version("/library/parts/2/file.mkv"),
+        ],
+        ..Default::default()
+    });
+    // From the pill: `version_ask` is None, so the pick ticks and the page stays put.
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    let (_, effects) = step(&mut screen, &ScreenEvent::App(AppMsg::VersionChosen { index: 1 }), None);
+    assert_eq!(screen.version, 1);
+    assert!(screen.version_chosen, "the ticked version is the page's choice from here on");
+    assert!(
+        !effects.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Content(_)))),
+        "a pill pick must not navigate anywhere ({} effect(s))",
+        effects.len()
+    );
+    // From Play: `version_ask` is armed, so the same pick starts that version.
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    screen.version_ask = Some(false);
+    let (_, effects) = step(&mut screen, &ScreenEvent::App(AppMsg::VersionChosen { index: 1 }), None);
+    match play_item(&effects).expect("a Play pick starts the playback") {
+        (PlayIntent::Item { part, version, .. }, _) => {
+            assert_eq!(*version, 1);
+            assert_eq!(part, "/library/parts/2/file.mkv");
+        }
+        _play => panic!("expected PlayIntent::Item for the picked version"),
+    }
+    clear();
+}
+
 #[test]
 fn a_show_trailer_disc_plays_the_extra_not_the_on_deck_episode() {
     let extra = trailer_extra();

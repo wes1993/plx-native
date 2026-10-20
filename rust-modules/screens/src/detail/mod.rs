@@ -2280,13 +2280,17 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
             }
             // The version picker committed a row. It names WHICH version and nothing else — the
             // panel only REPORTS, exactly as the *Also available* surface does — and this page
-            // remembers it and starts that version. `version_ask` carries whether the press that
-            // opened the picker was Play-from-Start; a pick from the *Versions* pill resumes.
+            // remembers it. A pick that answers a Play press (`version_ask`, armed by `play_hero`)
+            // starts that version at once; a pick from the *Versions* pill only CHOOSES — the tick
+            // moves, the page stays, and Play starts the ticked version afterwards.
             ScreenEvent::App(AppMsg::VersionChosen { index }) => {
                 self.version = *index;
                 self.version_chosen = true;
-                let from_start = self.version_ask.take().unwrap_or(false);
-                self.play_hero(from_start, cx, fx, meta);
+                if let Some(from_start) = self.version_ask.take() {
+                    self.play_hero(from_start, cx, fx, meta);
+                } else {
+                    fx.invalidate(Provenance::Input);
+                }
                 Handled::Yes
             }
             // Dismissed: the page under this surface has just been entered again, and it decided
@@ -4358,8 +4362,8 @@ impl DetailScreen {
                 self.play_hero(true, cx, fx, meta);
             }
             // The *Versions* pill: open the picker at the page's current choice. Picking a row
-            // plays that version (`AppMsg::VersionChosen`), which is also what a first Play on a
-            // multi-version item does — see `play_hero`.
+            // only CHOOSES it (the tick moves, the page stays — see `AppMsg::VersionChosen`); a
+            // first Play on a multi-version item opens the same picker and THAT pick plays.
             hero::HeroCtl::Versions => {
                 if let Some(anchor) = self.hero_anchor(ctl, cx, meta) {
                     let current = self.detail(meta).map_or(0, |d| self.clamp_version(d.play_versions()));

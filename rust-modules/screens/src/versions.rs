@@ -26,7 +26,9 @@
 //!
 //! **A press only REPORTS** (`AppMsg::VersionChosen`): starting a playback needs the playback
 //! session's `&mut` and the `MainThread` token, neither of which a screen may name (§2.1), so the
-//! panel names WHICH version and the Detail page plays it — `AltSourcesScreen`'s shape exactly.
+//! panel names WHICH version and the Detail page decides — playing it when the pick answers a Play
+//! press, only moving the tick when it came from the *Versions* pill — `AltSourcesScreen`'s shape
+//! exactly.
 
 use std::borrow::Cow;
 use std::convert::Infallible;
