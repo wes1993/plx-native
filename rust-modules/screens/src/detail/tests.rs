@@ -136,6 +136,7 @@ pub(super) fn bare_held(sid: ServerId, rk: &str) -> DetailScreen {
         version: 0,
         version_chosen: false,
         version_ask: None,
+        reasked: false,
         restore_intent: None,
         teardown_cleared: false,
         withdrawn: false,
@@ -2734,6 +2735,36 @@ fn a_pill_pick_only_moves_the_tick_while_a_play_pick_starts_playback() {
         }
         _play => panic!("expected PlayIntent::Item for the picked version"),
     }
+    clear();
+}
+
+/// **A live page whose slot moved under it asks again.** Back from a presented copy's playback can
+/// install the UNDERLYING page's refetch into the slot while the copy is still alive on top: the
+/// copy's `Enter` ran once, nothing for it is in flight, and without a re-ask it sits on
+/// "Caricamento…" forever (measured on-device: the copy's page stayed blank after the underlying
+/// page's refetch installed). One recovery shot per epoch, never a loop.
+#[test]
+fn a_page_whose_slot_moved_under_it_reasks_once() {
+    fn asked_rks(effects: &[plx_machine::machine::Stamped<TestHost>]) -> Vec<String> {
+        effects.iter().filter_map(|effect| match &effect.fx {
+            Fx::App(AppFx::Store(StoreId::Metadata, StoreCmd::Metadata(MetadataCmd::RequestDetail { rk, .. }))) => Some(rk.clone()),
+            _ => None,
+        }).collect()
+    }
+    let sid = ServerId::UNSET;
+    // the copy's page stands on "b" while the slot holds "a"
+    let _guard = install(detail(sid, "a"));
+    let mut screen = bare(&_guard, sid, "b");
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1), None);
+    assert_eq!(asked_rks(&effects), vec!["b".to_string()], "the page must ask for its own item again");
+    assert!(screen.reasked);
+    // ...and only once: the next notice does not hammer the server.
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2), None);
+    assert!(asked_rks(&effects).is_empty(), "one recovery shot, never a loop");
+    // its item landing re-arms the latch for the next loss.
+    plx_data::metadata::set_current_for_test(test_store().state_mut(), Some(detail(sid, "b")));
+    let _ = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 3), None);
+    assert!(!screen.reasked, "a present item re-arms the latch");
     clear();
 }
 

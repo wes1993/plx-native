@@ -2416,7 +2416,11 @@ pub const SCREEN_SHAPES: &[&str] = &[
 // `version` and whether the viewer has picked one (`version_chosen`) — both change what the Play
 // control does, so both are logical state. Re-record replay fixtures before trusting a Detail or
 // version-picker transcript; the previous pin was 0x07c8_d161_c006_f959.
-const SCREEN_SHAPES_PIN: u64 = 0x5c3f_17e5_43c9_02a0;
+// Detail re-ask (`reasked`): `screens::detail::SHAPE` gains whether the page already spent its one
+// recovery re-request for the current absence epoch — it changes whether a `StoreChanged` asks the
+// server again, so it is logical state. Same re-record rule; the previous pin was
+// 0x5c3f_17e5_43c9_02a0.
+const SCREEN_SHAPES_PIN: u64 = 0xa3cf_ace5_43a5_c29a;
 
 #[cfg(test)]
 mod arg_tests {

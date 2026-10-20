@@ -105,6 +105,7 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
         version: 0,
         version_chosen: false,
         version_ask: None,
+        reasked: false,
         scroll: Spring::at(0.0),
         scroll_target: 0.0,
         episode_scroll: Spring::at(0.0),

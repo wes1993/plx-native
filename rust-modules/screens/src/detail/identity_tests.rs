@@ -77,6 +77,7 @@ fn body(entry: EntryId, rk: &str) -> DetailScreen {
         version: 0,
         version_chosen: false,
         version_ask: None,
+        reasked: false,
         scroll_target: 0.0, episode_scroll: Spring::at(0.0), tab_scroll: Spring::at(0.0),
         episode_cells: episodes::Cells::new(),
             ep_want: Default::default(),

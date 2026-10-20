@@ -90,7 +90,7 @@ const COMPACT_TITLE_FADE: f32 = 200.0;
 const K_SCROLL: f32 = plx_ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
 
-pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
+pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,reasked:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 // The blocks packed end to end: each section starts where the one before it ends, so the chain
 // proves they are disjoint. The episodes come last, at 2^30, and end where the engine keys begin.
@@ -259,6 +259,11 @@ pub struct DetailScreen {
     /// A Play press waiting on the picker's answer, carrying whether it was Play-from-Start.
     /// Transient — the answer lands within a frame or two — so it is deliberately NOT hashed.
     version_ask: Option<bool>,
+    /// This page already spent its one recovery re-request for the current absence epoch
+    /// ([`Self::reask_detail`]). A LOGICAL decision (it changes whether a `StoreChanged` asks the
+    /// server again), so it is hashed into [`SHAPE`]; cleared on `Enter` and whenever the item is
+    /// present, so each visit and each new loss gets one shot, never a hot loop.
+    reasked: bool,
     restore_intent: Option<RestoreIntent>,
     /// This page has already sent its addressed `ClearItem` to the Metadata store. §3.4's
     /// `pop_sequence` delivers `WillLeave(ForGood)` AND `Unmount` to the same body, and both land
@@ -578,6 +583,7 @@ impl DetailScreen {
             version: 0,
             version_chosen: false,
             version_ask: None,
+            reasked: false,
             restore_intent: None,
             teardown_cleared: false,
             withdrawn: false,
@@ -2031,6 +2037,9 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
             ScreenEvent::Enter(kind) => {
                 let refresh = self.refresh;
                 let request_status = meta.detail_request_status(self.sid, &self.rk);
+                // A new visibility epoch: the arm below decides this frame's own request, and a
+                // later `StoreChanged` may spend one recovery re-ask against it.
+                self.reasked = false;
                 // Deferred is newer than every request that could already occupy this address:
                 // it was armed only after the ViewState write completed. Always supersede that
                 // pre-write generation when the page becomes visible. Requested normally reuses
@@ -2084,6 +2093,9 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                         self.season_metrics.update(detail, cx.measure);
                         self.about_rows.update(detail);
                     }
+                    // The slot may have moved under this page while it was covered — ask again
+                    // (once per epoch) rather than sitting on "Caricamento…" forever.
+                    self.reask_detail(meta, fx);
                 }
                 self.pump_restore(meta, fx);
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
@@ -2386,8 +2398,7 @@ impl DetailScreen {
     /// Record a server obligation the sender has already backed (`Requested`) or that must wait
     /// for this page to own the Metadata slot again (`Deferred`). The one place the phase is set
     /// from outside, by `DetailReconcile`.
-    fn owe_refresh(&mut self, refresh: DetailRefreshPhase, meta: plx_data::metadata::MetadataView<'_>) {
-        match refresh {
+    fn owe_refresh(&mut self, refresh: DetailRefreshPhase, meta: plx_data::metadata::MetadataView<'_>) {        match refresh {
             DetailRefreshPhase::None => {}
             DetailRefreshPhase::Deferred => self.refresh = DetailRefreshPhase::Deferred,
             DetailRefreshPhase::Requested => {
@@ -2400,6 +2411,47 @@ impl DetailScreen {
                 self.refresh = DetailRefreshPhase::Requested;
             }
         }
+    }
+
+    /// Ask for our item again when the slot holds nothing for us and nothing for us is in flight.
+    /// `Enter` is the only other requester and it ran once; a landing that installed ANOTHER
+    /// item (a covered page's refetch, a sibling screen's resolve) — or a fetch that failed
+    /// silently — otherwise leaves this page on "Caricamento…" forever: measured on-device, Back
+    /// from a presented copy's playback left the copy blank after the underlying page's refetch
+    /// installed, with no request outstanding for the copy and none ever issued again.
+    ///
+    /// Bounded by [`Self::reasked`]: one recovery shot per `Enter` and per new loss, so a
+    /// genuinely missing item costs two fetches per visit, never a hot loop (`StoreChanged`
+    /// fires for every store note). Skipped while a reconciliation is owed (`refresh`): that
+    /// obligation owns this address and retires on its own terminal.
+    fn reask_detail<H: ContentLike>(
+        &mut self,
+        meta: plx_data::metadata::MetadataView<'_>,
+        fx: &mut Effects<'_, H>,
+    ) {
+        if self.detail(meta).is_some() {
+            self.reasked = false;
+            return;
+        }
+        if self.reasked
+            || self.refresh != DetailRefreshPhase::None
+            || meta.detail_request_status(self.sid, &self.rk) == Some(true)
+        {
+            return;
+        }
+        self.reasked = true;
+        plx_base::eventlog::log(&format!(
+            "detail: re-ask sid={} rk={} (slot moved under a live page)",
+            self.sid.raw(),
+            self.rk,
+        ));
+        fx.push(Fx::App(AppFx::Store(
+            StoreId::Metadata,
+            StoreCmd::Metadata(MetadataCmd::RequestDetail {
+                sid: self.sid,
+                rk: self.rk.clone(),
+            }),
+        )));
     }
 
     fn restore_target_matches(&self, located: Located, meta: plx_data::metadata::MetadataView<'_>) -> bool {
@@ -3423,7 +3475,7 @@ impl LogicalState for DetailScreen {
             DetailRefreshPhase::Deferred => 1,
             DetailRefreshPhase::Requested => 2,
         });
-        w.u32(self.version as u32).bool(self.version_chosen);
+        w.u32(self.version as u32).bool(self.version_chosen).bool(self.reasked);
         match &self.restore_intent {
             Some(intent) => {
                 w.bool(true)
