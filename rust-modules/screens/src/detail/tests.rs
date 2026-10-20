@@ -2761,7 +2761,7 @@ fn an_alt_pick_only_moves_the_tick_onto_the_copy() {
     );
     assert_eq!(
         screen.alt_choice,
-        Some(crate::alt_sources::AltChoice { sid, rk: "copy".into() }),
+        Some(crate::registry::AltChoice { sid, rk: "copy".into() }),
         "the pick is remembered"
     );
     assert!(
@@ -2860,7 +2860,7 @@ fn play_with_a_picked_copy_emits_a_copy_intent_for_it() {
         ..Default::default()
     });
     let mut screen = bare(&_guard, sid, "film");
-    screen.alt_choice = Some(crate::alt_sources::AltChoice { sid, rk: "copy".into() });
+    screen.alt_choice = Some(crate::registry::AltChoice { sid, rk: "copy".into() });
     let (_, effects) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_PLAY), Some(hero::ELEM_PLAY));
     match play_item(&effects).expect("Play with a choice emits a play") {
         (PlayIntent::Copy { sid: csid, rk, from_start }, _) => {

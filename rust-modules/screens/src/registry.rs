@@ -103,6 +103,10 @@ pub use crate::item_menu::has_actions as item_has_menu;
 pub use crate::item_menu::Action as ItemMenuAction;
 /// Re-exported so a screen's test host names its init through the registry.
 pub use crate::family::NoInit;
+/// The Also-available pick: the Detail page remembers it and the alt-sources panel reports it.
+/// It lives here, never by naming the sibling `alt_sources` (`sibling` gate admits only
+/// `crate::registry`).
+pub use crate::alt_sources::AltChoice;
 /// The panels a sibling screen's host test reads through the shared vocabulary (the `sibling` gate
 /// admits only `crate::registry`): the Detail page's tests drive the real About panel and compare
 /// the audio summary against the tracks panel's full list.

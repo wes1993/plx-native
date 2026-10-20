@@ -262,7 +262,7 @@ pub struct DetailScreen {
     /// The *Also available* copy the viewer picked, if it picked another one: the ticked row.
     /// Picking the page's own copy clears it. A LOGICAL decision (the hero's Play starts it
     /// straight into the player instead of the page's own item), so it is hashed into [`SHAPE`].
-    alt_choice: Option<crate::alt_sources::AltChoice>,
+    alt_choice: Option<crate::registry::AltChoice>,
     /// This page already spent its one recovery re-request for the current absence epoch
     /// ([`Self::reask_detail`]). A LOGICAL decision (it changes whether a `StoreChanged` asks the
     /// server again), so it is hashed into [`SHAPE`]; cleared on `Enter` and whenever the item is
@@ -2306,7 +2306,7 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
             ScreenEvent::App(AppMsg::AltSourceChosen { sid, rk }) => {
                 self.alt_choice =
                     (!plx_plex::plex::same_item((*sid, rk.as_str()), (self.sid, self.rk.as_str())))
-                    .then(|| crate::alt_sources::AltChoice { sid: *sid, rk: rk.clone() });
+                    .then(|| crate::registry::AltChoice { sid: *sid, rk: rk.clone() });
                 fx.invalidate(Provenance::Input);
                 Handled::Yes
             }
