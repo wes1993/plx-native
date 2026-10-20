@@ -1,4 +1,4 @@
-{"updated":"2026-10-20T11:30:27Z",
+{"updated":"2026-10-20T11:40:07Z",
 "ci":[
 {"id":39292589962,"at":"2026-10-19T17:15:42Z","sha":"51157f93d","title":"Version picker + Continue Watching duplicate-poster fixes","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":6,"host lint + type-checks":202,"host harness tests":179,"armv7 cross-build and artifact assertions":423,"host python/shell/C gates":231,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
 {"id":39297053928,"at":"2026-10-19T17:46:54Z","sha":"a19c7a3a5","title":"Deck: one poster per title, across sources too","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":7,"host lint + type-checks":134,"host harness tests":187,"host python/shell/C gates":273,"armv7 cross-build and artifact assertions":343,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
@@ -23,7 +23,8 @@
 {"id":39407927563,"at":"2026-10-20T10:26:16Z","sha":"0e50f425b","title":"Re-record replay fixtures for the current state shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":116,"Linux simulator build + launch":278,"macOS simulator build + launch":278,"Windows launcher syntax":20}},
 {"id":39408842682,"at":"2026-10-20T10:34:00Z","sha":"a40ed3aef","title":"Detail re-ask yields while anything is playing","pr":null,"conclusion":"failure","attempt":1,"jobs":{"Windows launcher syntax":19,"macOS tests against bundled FFmpeg and ASS":139,"Linux simulator build + launch":269},"failed":["macOS simulator build + launch"]},
 {"id":39410695701,"at":"2026-10-20T10:49:58Z","sha":"9e6d6f55a","title":"Detail re-ask yields only to the playback that owns the slot","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":127,"Linux simulator build + launch":258,"Windows launcher syntax":18,"macOS simulator build + launch":202}},
-{"id":39414733419,"at":"2026-10-20T11:24:32Z","sha":"50f0d0ecd","title":"Retire a replaced encoder with stop AND resource close","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":132,"Windows launcher syntax":22,"macOS simulator build + launch":226,"Linux simulator build + launch":251}}
+{"id":39414733419,"at":"2026-10-20T11:24:32Z","sha":"50f0d0ecd","title":"Retire a replaced encoder with stop AND resource close","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":132,"Windows launcher syntax":22,"macOS simulator build + launch":226,"Linux simulator build + launch":251}},
+{"id":39416073826,"at":"2026-10-20T11:35:47Z","sha":"6c1d74a36","title":"Re-record replay fixtures for the covered-flag shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"Linux simulator build + launch":249,"Windows launcher syntax":17,"macOS simulator build + launch":189,"macOS tests against bundled FFmpeg and ASS":81}}
 ],
 "nightly":[],
 "cancelled":{},
