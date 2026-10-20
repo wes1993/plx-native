@@ -1,4 +1,4 @@
-{"updated":"2026-10-20T14:08:08Z",
+{"updated":"2026-10-20T16:23:50Z",
 "ci":[
 {"id":39292589962,"at":"2026-10-19T17:15:42Z","sha":"51157f93d","title":"Version picker + Continue Watching duplicate-poster fixes","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":6,"host lint + type-checks":202,"host harness tests":179,"armv7 cross-build and artifact assertions":423,"host python/shell/C gates":231,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
 {"id":39297053928,"at":"2026-10-19T17:46:54Z","sha":"a19c7a3a5","title":"Deck: one poster per title, across sources too","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":7,"host lint + type-checks":134,"host harness tests":187,"host python/shell/C gates":273,"armv7 cross-build and artifact assertions":343,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
@@ -29,7 +29,8 @@
 {"id":39414733419,"at":"2026-10-20T11:24:32Z","sha":"50f0d0ecd","title":"Retire a replaced encoder with stop AND resource close","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":132,"Windows launcher syntax":22,"macOS simulator build + launch":226,"Linux simulator build + launch":251}},
 {"id":39416073826,"at":"2026-10-20T11:35:47Z","sha":"6c1d74a36","title":"Re-record replay fixtures for the covered-flag shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"Linux simulator build + launch":249,"Windows launcher syntax":17,"macOS simulator build + launch":189,"macOS tests against bundled FFmpeg and ASS":81}},
 {"id":39428896669,"at":"2026-10-20T13:15:46Z","sha":"09e7a4957","title":"Always reconcile-close a retired encoder, even after a 2xx stop","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":136,"macOS simulator build + launch":281,"Windows launcher syntax":22,"Linux simulator build + launch":279}},
-{"id":39435689191,"at":"2026-10-20T14:02:35Z","sha":"3ed2c7d87","title":"Expose parked page navigation to screens; re-ask yields to it","pr":null,"conclusion":"failure","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":157,"Linux simulator build + launch":288,"Windows launcher syntax":37},"failed":["macOS simulator build + launch"]}
+{"id":39435689191,"at":"2026-10-20T14:02:35Z","sha":"3ed2c7d87","title":"Expose parked page navigation to screens; re-ask yields to it","pr":null,"conclusion":"failure","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":157,"Linux simulator build + launch":288,"Windows launcher syntax":37},"failed":["macOS simulator build + launch"]},
+{"id":39456477936,"at":"2026-10-20T16:19:54Z","sha":"7b33de3a1","title":"Re-record replay fixtures for the alt-choice shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"Windows launcher syntax":20,"macOS simulator build + launch":146,"Linux simulator build + launch":221,"macOS tests against bundled FFmpeg and ASS":143}}
 ],
 "nightly":[],
 "cancelled":{},
