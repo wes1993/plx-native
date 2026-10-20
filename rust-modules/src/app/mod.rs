@@ -290,6 +290,10 @@ pub(crate) struct App {
     /// already finished by then). See `input::menu_play_tick`, driven every frame beside
     /// `pump_detail()` (`app/run.rs`).
     pub(crate) menu_play_await: Option<MenuPlayAwait>,
+    /// An Also-available copy resolving off-frame for direct playback: the hero's Play with the
+    /// page's picked copy. See `playback::alt_play_tick`, driven every frame beside
+    /// `menu_play_tick`.
+    pub(crate) alt_play_wait: Option<playback::AltPlayWait>,
     pub(crate) prev: u32,
     /// A playback exit is owed a re-read of Home's hubs and every library's shelves. Armed by
     /// `exit_player`; spent by `playback_tick` once the stop's `stopped` POST has landed

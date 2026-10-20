@@ -140,6 +140,8 @@ pub(super) fn request_play_intent(
     session: &mut plx_media::route::PlaybackSession,
     meta: &mut plx_data::stores::metadata::MetadataStore,
     play: &plx_screens::registry::PlayIntent,
+    alt_wait: &mut Option<super::playback::AltPlayWait>,
+    now: u32,
 ) -> bool {
     match play {
         plx_screens::registry::PlayIntent::Item {
@@ -155,6 +157,12 @@ pub(super) fn request_play_intent(
         }
         plx_screens::registry::PlayIntent::Movie(m) =>
             plx_media::route::request_play_movie(session, meta, m, &super::playback::movie_ctx(m)),
+        // An Also-available copy: its streams live on its server and nothing on this thread may
+        // block for them. Arm the off-frame fetch instead of resolving now; the tick plays it.
+        plx_screens::registry::PlayIntent::Copy { sid, rk, from_start } => {
+            super::playback::arm_alt_play(alt_wait, *sid, rk.clone(), *from_start, now);
+            true
+        }
     }
 }
 
@@ -212,7 +220,7 @@ pub(super) fn clear_engine_for_play(
     }
 }
 
-fn drain_held_feature(app: &mut App) {
+fn drain_held_feature(app: &mut App, now: u32) {
     if HELD_FEATURE.with(|slot| slot.borrow().is_none()) {
         return;
     }
@@ -222,7 +230,7 @@ fn drain_held_feature(app: &mut App) {
     }
     let held = HELD_FEATURE.with(|slot| slot.borrow_mut().take());
     let Some(held) = held else { return };
-    if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &held.play) {
+    if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &held.play, &mut app.alt_play_wait, now) {
         return;
     }
     start_playback(
@@ -472,7 +480,7 @@ mod held_feature_tests {
 
 pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
     halt_preview_off_its_page(app);
-    drain_held_feature(app);
+    drain_held_feature(app, fr.now);
     home_requests(app, fr.now);
     library_requests(app, fr.now);
     search_requests(app);
@@ -546,7 +554,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 // is what the page's own discarded `started` bool used to decide.
                 // Held-feature drain uses this same helper: a trailer Play pressed while a
                 // preview still occupies must install the Info-card descriptor too.
-                if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &play) { continue; }
+                if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &play, &mut app.alt_play_wait, fr.now) { continue; }
                 // The page's own `ReturnState` rides the push, so BACK out of the playback finds
                 // the spot the Play was pressed from. It was `Trail::set_top_spot` plus a
                 // second, hand-written `NavOp::Push` after the fact.

@@ -2502,6 +2502,10 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             menu_play_tick(&mut app.player.session, &mut app.adapters.player,
                 &mut app.pages, &mut app.bridge, &mut app.menu_play_await, fr.now);
         }
+        if app.alt_play_wait.is_some() {
+            super::playback::alt_play_tick(&mut app.player.session, &mut app.adapters.player,
+                &mut app.pages, &mut app.bridge, &mut app.alt_play_wait, fr.now);
+        }
         // Server-side view-state WRITES (Mark as Watched / Unwatched, Remove from Deck): send
         // the next queued one, land the last one's answer and kick the refresh it owes. Route-
         // unconditional for the same reason as the two pumps around it — the user can walk off
@@ -3408,6 +3412,7 @@ mod lifecycle_regression_tests {
             last_route_reported: Default::default(),
             ptr: Pointer::IDLE,
             menu_play_await: Default::default(),
+            alt_play_wait: Default::default(),
             prev: Default::default(),
             refresh_hubs: Default::default(),
             return_hold: Default::default(),

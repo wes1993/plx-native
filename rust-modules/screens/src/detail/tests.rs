@@ -137,6 +137,7 @@ pub(super) fn bare_held(sid: ServerId, rk: &str) -> DetailScreen {
         version: 0,
         version_chosen: false,
         version_ask: None,
+        alt_choice: None,
         reasked: false,
         covered: false,
         restore_intent: None,
@@ -2740,6 +2741,138 @@ fn a_pill_pick_only_moves_the_tick_while_a_play_pick_starts_playback() {
     clear();
 }
 
+/// **A pick in *Disponibile anche su* only CHOOSES.** It records the copy and stays on the page —
+/// no navigation, no playback. Picking the page's own copy clears the choice back to default.
+#[test]
+fn an_alt_pick_only_moves_the_tick_onto_the_copy() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "film".into(),
+        kind: "movie".into(),
+        title: "Film".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, sid, "film");
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::App(AppMsg::AltSourceChosen { sid, rk: "copy".into() }),
+        None,
+    );
+    assert_eq!(
+        screen.alt_choice,
+        Some(crate::alt_sources::AltChoice { sid, rk: "copy".into() }),
+        "the pick is remembered"
+    );
+    assert!(
+        !effects.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Content(_)))),
+        "a pick must not navigate anywhere ({} effect(s))",
+        effects.len()
+    );
+    // Picking the page's own copy clears the choice.
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::App(AppMsg::AltSourceChosen { sid, rk: "film".into() }),
+        None,
+    );
+    assert_eq!(screen.alt_choice, None);
+    assert!(
+        !effects.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Content(_)))),
+        "clearing must not navigate either ({} effect(s))",
+        effects.len()
+    );
+    clear();
+}
+
+/// **A picked copy plays straight off the page.** `play_for_leaf` builds the same intent the
+/// hero would for the loaded item — version 0, no picker, no catalog row — against an explicitly
+/// handed record, so the loop can resolve a copy the store slot never holds.
+#[test]
+fn play_for_leaf_builds_a_direct_intent_for_a_movie_copy() {
+    let d = Detail {
+        sid: ServerId::UNSET,
+        rk: "copy".into(),
+        kind: "movie".into(),
+        title: "Copy".into(),
+        part: "/library/parts/9/file.mkv".into(),
+        vcodec: "h264".into(),
+        acodec: "aac".into(),
+        resume_ms: 15_000,
+        dur_ms: 60_000,
+        ..Default::default()
+    };
+    let (intent, resume_ns, now) =
+        DetailScreen::play_for_leaf(&d, false).expect("a movie copy plays");
+    match intent {
+        PlayIntent::Item { rk, part, version, .. } => {
+            assert_eq!(rk, "copy");
+            assert_eq!(part, "/library/parts/9/file.mkv");
+            assert_eq!(version, 0, "a picked copy carries no picker choice");
+        }
+        _ => panic!("expected PlayIntent::Item for the copy"),
+    }
+    assert_eq!(resume_ns, plx_data::metadata::resume_ns(15_000, 60_000));
+    assert_eq!(now.title, "Copy");
+    assert!(!now.is_episode);
+    let (_, restart_ns, _) = DetailScreen::play_for_leaf(&d, true).expect("restart plays too");
+    assert_eq!(restart_ns, 0, "Restart ignores the resume point");
+}
+
+/// A show copy plays its hero episode; a kind with nothing playable refuses, so the caller opens
+/// the copy's page instead.
+#[test]
+fn play_for_leaf_plays_a_show_heros_episode_and_refuses_the_rest() {
+    let _guard = plx_base::testlock::serial();
+    let sid = ServerId::UNSET;
+    let mut d = detail(sid, "show");
+    d.title = "Show".into();
+    let (intent, _, now) = DetailScreen::play_for_leaf(&d, false).expect("a show copy plays");
+    match intent {
+        PlayIntent::Item { rk, .. } => assert_eq!(rk, "e1", "no on-deck episode: the first one"),
+        _ => panic!("expected PlayIntent::Item for the episode"),
+    }
+    assert!(now.is_episode);
+    let mut dud = Detail {
+        sid,
+        rk: "season".into(),
+        kind: "season".into(),
+        is_show: false,
+        ..Default::default()
+    };
+    dud.episodes = Vec::new().into();
+    assert!(
+        DetailScreen::play_for_leaf(&dud, false).is_none(),
+        "nothing playable: the caller opens the page"
+    );
+    clear();
+}
+
+/// **Play with a picked copy addresses the copy.** The hero emits a `Copy` intent for it instead
+/// of playing the page's own item — the loop resolves and starts it without opening its page.
+#[test]
+fn play_with_a_picked_copy_emits_a_copy_intent_for_it() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "film".into(),
+        kind: "movie".into(),
+        title: "Film".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, sid, "film");
+    screen.alt_choice = Some(crate::alt_sources::AltChoice { sid, rk: "copy".into() });
+    let (_, effects) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_PLAY), Some(hero::ELEM_PLAY));
+    match play_item(&effects).expect("Play with a choice emits a play") {
+        (PlayIntent::Copy { sid: csid, rk, from_start }, _) => {
+            assert_eq!(*csid, sid);
+            assert_eq!(rk, "copy");
+            assert!(!from_start);
+        }
+        _ => panic!("expected PlayIntent::Copy for the picked copy"),
+    }
+    clear();
+}
+
 /// **A live page whose slot moved under it asks again.** Back from a presented copy's playback can
 /// install the UNDERLYING page's refetch into the slot while the copy is still alive on top: the
 /// copy's `Enter` ran once, nothing for it is in flight, and without a re-ask it sits on
@@ -2847,6 +2980,7 @@ fn a_show_trailer_disc_plays_the_extra_not_the_on_deck_episode() {
             assert_ne!(context.as_str(), plx_data::metadata::TRAILER_CONTEXT);
         }
         (PlayIntent::Movie(_), _) => {}
+        (PlayIntent::Copy { .. }, _) => panic!("show Play must play the show, not a copy"),
     }
     clear();
 }

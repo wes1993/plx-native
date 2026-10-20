@@ -1054,11 +1054,12 @@ pub enum ContentReq {
 /// overlays, which share a key ladder and a transport rule. These share nothing: two are read-only
 /// `Style::Alert` sheets (one with a page cursor, one with none), one is a `Style::Compact` menu
 /// anchored to a button whose OK navigates.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ContentPanel {
     /// *Also available* (`screens::alt_sources`), anchored to the drawn rect of the pill that
     /// opened it — bit-preserving, so a canonical argument holds it without float equality.
-    AltSources { anchor: [u32; 4] },
+    /// `choice` is the copy the page picked, if it picked another one: the panel's tick.
+    AltSources { anchor: [u32; 4], choice: Option<crate::alt_sources::AltChoice> },
     /// *Versions* (`screens::versions`), the same anchored `Style::Compact` menu off the hero's
     /// *Versions* pill — or off the Play pill, when a first Play on a multi-version item opens it
     /// rather than guessing. It lists the item's `Media[]` and reports the pick. `current` is the
@@ -1103,7 +1104,7 @@ impl ContentPanel {
     ) -> Option<(plx_ui::containers::modal::Style, AppArg)> {
         use plx_ui::containers::modal::Style;
         Some(match self {
-            Self::AltSources { anchor } => {
+            Self::AltSources { anchor, choice } => {
                 let (sid, rk) = subject?;
                 (
                     Style::Compact,
@@ -1111,6 +1112,7 @@ impl ContentPanel {
                         host,
                         sid,
                         rk: rk.to_string(),
+                        choice: choice.clone(),
                         anchor,
                     }),
                 )
@@ -1168,6 +1170,16 @@ pub enum PlayIntent {
     /// boundary, and once Detail's `selected` becomes an owned per-page snapshot (rather than a
     /// process-wide catalog read) there is no `'static` row left to borrow.
     Movie(plx_data::pms::PmsMovie),
+    /// An Also-available copy the page picked, to resolve off-frame and play straight into the
+    /// player — no navigation to the copy's page, no fetch through the store slot (which would
+    /// blank the page being looked at). `from_start` rides along because the resume point only
+    /// exists once the copy's own record lands. `resume_ns` on the enclosing [`ContentReq::Play`]
+    /// is an ignored placeholder for this variant; the drain computes the real one post-fetch.
+    Copy {
+        sid: plx_plex::plex::ServerId,
+        rk: String,
+        from_start: bool,
+    },
 }
 
 pub trait ContentLike: AppLike<Memory = PageMemory> {}
@@ -1272,10 +1284,13 @@ pub enum AppMsg {
     /// `Requested` (the sender admitted the request synchronously) for the page on top and
     /// `Deferred` for a covered one; `None` is ignored.
     DetailReconcile { refresh: DetailRefreshPhase },
-    /// The *Also available* surface committed a row: open that copy's own page. The SURFACE names
-    /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
-    /// what keeps "what a press means on the Detail page" in one place instead of two.
-    AltSourceOpen(ContentArg),
+    /// The *Also available* surface committed a row: remember it as this page's chosen copy.
+    /// The SURFACE names WHICH and nothing else — the panel only REPORTS, exactly as the
+    /// *Versions* surface does with [`VersionChosen`](Self::VersionChosen) — and this page only
+    /// moves its tick. Nothing navigates and nothing plays: the hero's Play starts the ticked
+    /// copy directly, without opening its page. (This replaced `AltSourceOpen`'s navigate, whose
+    /// fresh-page fetch read as a full reload on every pick.)
+    AltSourceChosen { sid: plx_plex::plex::ServerId, rk: String },
     /// The *Versions* surface committed a row: the page remembers `index` and plays that version.
     /// The SURFACE names WHICH and the PAGE plays, [`AltSourceOpen`](Self::AltSourceOpen)'s shape —
     /// the panel cannot start a playback (`route::request_play` takes the session's `&mut`).
@@ -2163,6 +2178,7 @@ pub fn every_surface_arg() -> Vec<AppArg> {
             host: plx_machine::machine::InstanceId(1),
             sid: plx_plex::plex::ServerId::UNSET,
             rk: "1".into(),
+            choice: None,
             anchor: [0; 4],
         }),
         AppArg::Versions(crate::versions::VersionPickerArg {
@@ -2424,7 +2440,10 @@ pub const SCREEN_SHAPES: &[&str] = &[
 // A covered page must not re-ask for its item (the covering screen owns the slot), so it changes
 // the same decision and is logical state for the same reason. Same re-record rule; the previous
 // pin was 0xa3cf_ace5_43a5_c29a.
-const SCREEN_SHAPES_PIN: u64 = 0x45e1_13c3_bf9a_93bf;
+// Also-available choice (`alt_choice`, `AltSourcesArg::choice`): the picked copy moves the tick
+// and the hero's Play starts it straight into the player, so both are logical state. Same
+// re-record rule; the previous pin was 0x45e1_13c3_bf9a_93bf.
+const SCREEN_SHAPES_PIN: u64 = 0x3729_c3cd_c56f_26dd;
 
 #[cfg(test)]
 mod arg_tests {

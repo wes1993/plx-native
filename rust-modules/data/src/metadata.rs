@@ -2278,28 +2278,13 @@ pub struct NowPlaying {
     pub thumb: String, // 16:9 still (episode) / landscape art (movie)
     pub detail_rk: String, // "Go to Show"/"Go to Movie" target
 }
-fn set_now_playing(state: &mut MetadataState, np: Option<NowPlaying>) {
-    state.now = np;
-}
-/// Refresh `now_playing` from `current()` — call after a leaf `load_detail` (Continue-Watching /
-/// off-catalog play, where `current()` becomes the played leaf). A show/season load leaves it None.
-fn sync_now_playing(state: &mut MetadataState) {
-    let np = current(state).and_then(|d| match d.kind.as_str() {
-        "episode" => Some(NowPlaying {
-            is_episode: true,
-            is_real_episode: true,
-            title: d.show_title.clone(),
-            ep_title: d.title.clone(),
-            season: d.season,
-            index: d.index,
-            summary: d.summary.clone(),
-            year: d.year,
-            dur_ms: d.dur_ms,
-            rating: d.rating.clone(),
-            thumb: d.thumb.clone(),
-            detail_rk: d.show_rk.clone(),
-        }),
-        "movie" => Some(NowPlaying {
+
+impl NowPlaying {
+    /// The descriptor for a movie leaf — what the HUD caption and Info card read while it plays.
+    /// Factored out of [`sync_now_playing`] so a playback that never installs its leaf (an
+    /// Also-available copy played straight off its page) describes the same title.
+    pub fn movie_of(d: &Detail) -> Self {
+        NowPlaying {
             is_episode: false,
             is_real_episode: false,
             title: d.title.clone(),
@@ -2316,7 +2301,52 @@ fn sync_now_playing(state: &mut MetadataState) {
                 d.thumb.clone()
             },
             detail_rk: d.rk.clone(),
+        }
+    }
+
+    /// The descriptor for an episode leaf. Same provenance as [`NowPlaying::movie_of`].
+    pub fn episode_of(d: &Detail, ep: &Episode) -> Self {
+        NowPlaying {
+            is_episode: true,
+            is_real_episode: true,
+            title: d.title.clone(),
+            ep_title: ep.title.clone(),
+            season: ep.season,
+            index: ep.index,
+            summary: ep.summary.clone(),
+            year: ep.aired.get(..4).and_then(|s| s.parse().ok()).unwrap_or(0),
+            dur_ms: ep.dur_ms,
+            rating: ep.rating.clone(),
+            thumb: ep.thumb.clone(),
+            detail_rk: d.rk.clone(),
+        }
+    }
+}
+fn set_now_playing(state: &mut MetadataState, np: Option<NowPlaying>) {
+    state.now = np;
+}
+/// Refresh `now_playing` from `current()` — call after a leaf `load_detail` (Continue-Watching /
+/// off-catalog play, where `current()` becomes the played leaf). A show/season load leaves it None.
+fn sync_now_playing(state: &mut MetadataState) {
+    // A leaf episode page carries the episode's fields FLAT on its own Detail (title IS the
+    // episode title) — unlike `NowPlaying::episode_of`, which takes a show Detail plus its
+    // `Episode` struct. Only the movie arm shares its constructor.
+    let np = current(state).and_then(|d| match d.kind.as_str() {
+        "episode" => Some(NowPlaying {
+            is_episode: true,
+            is_real_episode: true,
+            title: d.show_title.clone(),
+            ep_title: d.title.clone(),
+            season: d.season,
+            index: d.index,
+            summary: d.summary.clone(),
+            year: d.year,
+            dur_ms: d.dur_ms,
+            rating: d.rating.clone(),
+            thumb: d.thumb.clone(),
+            detail_rk: d.show_rk.clone(),
         }),
+        "movie" => Some(NowPlaying::movie_of(d)),
         _ => None, // show / season → not a playing leaf
     });
     state.now = np;
@@ -3814,7 +3844,11 @@ fn selected_season_number(state: &MetadataState, sid: plx_plex::plex::ServerId, 
 /// (phase 12/D7 deleted the last one, `load_detail_now`; see that deletion's note below). Keep it
 /// that way: installing the result is the caller's job, and on the async path that must happen on
 /// the main thread (see the `DETAIL_LANDING`/`land_detail` note).
-fn fetch_full(sid: plx_plex::plex::ServerId, rk: &str, prefer: Option<i64>) -> Option<Detail> {
+///
+/// Public for the one other worker that needs a whole item without owning the store slot: the
+/// Also-available copy played straight off its page (the slot keeps the page's item, so the store
+/// request path is closed to it). Main-thread callers must not use this — issue `RequestDetail`.
+pub fn fetch_full(sid: plx_plex::plex::ServerId, rk: &str, prefer: Option<i64>) -> Option<Detail> {
     // `ms=` is the whole chain's wall clock. It is the exact cost `request_detail` moves off the
     // SDL loop, so it is the number to read when judging whether a call site can afford to block
     // — note the framedrop breakdown CANNOT show it (fd_pc0 starts after event handling).

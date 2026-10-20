@@ -449,13 +449,239 @@ pub(crate) fn request_loaded_episode(ps: &mut plx_media::route::PlaybackSession,
     request_episode(ps, meta, &d, &ep)
 }
 
+/// An Also-available copy resolving off-frame for direct playback — a hero Play (or Resume) with
+/// the page's picked copy, which plays straight into the player without opening the copy's page
+/// and without fetching through the store slot (which would blank the page being looked at).
+///
+/// Mirrors [`MenuPlayAwait`]'s shape (an armed wait the loop ticks beside the detail pump), but
+/// the fetch is a worker running [`plx_data::metadata::fetch_full`] — pure network + parsing,
+///Install nothing — rather than a store request, so the slot keeps the page's item throughout.
+/// The landing carries the whole record; the tick plays it with [`request_fetched_hero`] or, on
+/// failure or ceiling, opens the copy's page like a failed menu Play does. Identity-keyed like
+/// that wait: a newer press replaces the wait, and a landing for a replaced one is dropped.
+pub(crate) struct AltPlayWait {
+    sid: plx_plex::plex::ServerId,
+    rk: String,
+    /// The frame clock past which the wait gives up and lands on the copy's page — the same 12s
+    /// ceiling [`MenuPlayAwait`] uses for "this never got where it was going".
+    deadline: u32,
+}
+
+struct AltPlayLanding {
+    sid: plx_plex::plex::ServerId,
+    rk: String,
+    from_start: bool,
+    detail: Option<plx_data::metadata::Detail>,
+}
+
+static ALT_PLAY_SLOT: std::sync::Mutex<Option<AltPlayLanding>> =
+    std::sync::Mutex::new(None);
+
+/// Arm the wait and fetch the copy off-frame. Called from the `PlayIntent::Copy` arm instead of
+/// `request_play_intent`: the copy's streams live on its server and nothing on this thread may
+/// block for them.
+pub(crate) fn arm_alt_play(
+    wait: &mut Option<AltPlayWait>,
+    sid: plx_plex::plex::ServerId,
+    rk: String,
+    from_start: bool,
+    now: u32,
+) {
+    *wait = Some(AltPlayWait { sid, rk: rk.clone(), deadline: now.wrapping_add(12_000) });
+    let rk_fetch = rk;
+    plx_base::task::spawn_small("alt-play-fetch", move || {
+        let detail = plx_data::metadata::fetch_full(sid, &rk_fetch, None);
+        let mut slot = ALT_PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(AltPlayLanding { sid, rk: rk_fetch, from_start, detail });
+    });
+}
+
+/// The continuation half of an armed [`AltPlayWait`], run every frame beside `menu_play_tick`.
+/// Route-unconditional for the same reason: the Play press may have come from a page the fetch
+/// outlives.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn alt_play_tick(
+    ps: &mut plx_media::route::PlaybackSession,
+    pa: &mut plx_media::player::adapter::PlayerAdapter,
+    pages: &mut plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge,
+    wait: &mut Option<AltPlayWait>,
+    now: u32,
+) {
+    let Some(current) = wait.as_ref() else { return };
+    // Something else already moved the app onto the player — the wait is moot and must not fire
+    // a second Play on top of it (same guard `menu_play_tick` opens with).
+    if super::bridge::player(pages).is_some() {
+        *wait = None;
+        return;
+    }
+    let landed = ALT_PLAY_SLOT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take_if(|landing| landing.sid == current.sid && landing.rk == current.rk);
+    let Some(landing) = landed else {
+        if current.deadline_exceeded(now) {
+            let gone = wait.take().expect("checked above");
+            super::bridge::open_detail(pages, bridge, gone.sid, &gone.rk, None, None);
+        }
+        return;
+    };
+    let AltPlayLanding { sid, rk, from_start, detail } = landing;
+    *wait = None;
+    match detail {
+        Some(d) => {
+            if let Some(resume_ns) = request_fetched_hero(ps, bridge.metadata_mut(), &d, from_start) {
+                let hud_ms = if crate::dev::scenarios::detailplay_forces_headless_hud() {
+                    HUD_HEADLESS_MS
+                } else {
+                    HUD_LINGER_MS
+                };
+                start_playback(ps, pa, resume_ns, Origin::Here, hud_ms, None, pages, bridge);
+            } else {
+                super::bridge::open_detail(pages, bridge, sid, &rk, None, None);
+            }
+        }
+        // The fetch settled as a failure — land on the copy's page, as the detail phase does.
+        None => super::bridge::open_detail(pages, bridge, sid, &rk, None, None),
+    }
+}
+
+impl AltPlayWait {
+    fn deadline_exceeded(&self, now: u32) -> bool {
+        now.wrapping_sub(self.deadline) < u32::MAX / 2
+    }
+}
+
+#[cfg(test)]
+mod alt_play_tests {
+    use super::*;
+
+    fn sid(n: u16) -> plx_plex::plex::ServerId {
+        plx_plex::plex::ServerId::from_raw(n)
+    }
+
+    fn drain_slot() {
+        ALT_PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+
+    fn rig() -> (
+        plx_media::route::PlaybackSession,
+        plx_media::player::adapter::PlayerAdapter,
+        plx_ui::dispatch::Dispatcher<super::bridge::AppHost>,
+        super::bridge::Bridge,
+    ) {
+        let _guard = plx_base::testlock::serial();
+        let mt = unsafe { plx_base::task::MainThread::assume() };
+        (
+            plx_media::route::PlaybackSession::default(),
+            plx_media::player::adapter::PlayerAdapter::new(mt),
+            plx_ui::dispatch::Dispatcher::new(),
+            super::bridge::Bridge::for_test(|| 0),
+        )
+    }
+
+    /// A landing for a wait that moved on is dropped, and the wait survives it.
+    #[test]
+    fn a_stale_landing_is_dropped_and_the_wait_survives() {
+        drain_slot();
+        let (mut ps, mut pa, mut pages, mut bridge) = rig();
+        let mut wait = Some(AltPlayWait { sid: sid(3), rk: "new".into(), deadline: 100 });
+        *ALT_PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(AltPlayLanding {
+            sid: sid(4),
+            rk: "old".into(),
+            from_start: false,
+            detail: None,
+        });
+        alt_play_tick(&mut ps, &mut pa, &mut pages, &mut bridge, &mut wait, 50);
+        assert!(wait.is_some(), "a mismatched landing must not clear the wait");
+        assert!(
+            ALT_PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).is_some(),
+            "a mismatched landing stays queued"
+        );
+        drain_slot();
+    }
+
+    /// Past the ceiling the wait gives up onto the copy's page instead of hanging the press.
+    #[test]
+    fn the_ceiling_lands_on_the_copys_page() {
+        drain_slot();
+        let (mut ps, mut pa, mut pages, mut bridge) = rig();
+        let mut wait = Some(AltPlayWait { sid: sid(3), rk: "copy".into(), deadline: 100 });
+        alt_play_tick(&mut ps, &mut pa, &mut pages, &mut bridge, &mut wait, 12_101);
+        assert!(wait.is_none(), "the ceiling ends the wait");
+        assert!(super::bridge::player(&pages).is_none(), "no playback starts");
+        drain_slot();
+    }
+
+    /// A fetch that settled as a failure lands on the copy's page, like a failed menu Play.
+    #[test]
+    fn a_failed_fetch_lands_on_the_copys_page() {
+        drain_slot();
+        let (mut ps, mut pa, mut pages, mut bridge) = rig();
+        let mut wait = Some(AltPlayWait { sid: sid(3), rk: "copy".into(), deadline: 10_000 });
+        *ALT_PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(AltPlayLanding {
+            sid: sid(3),
+            rk: "copy".into(),
+            from_start: false,
+            detail: None,
+        });
+        alt_play_tick(&mut ps, &mut pa, &mut pages, &mut bridge, &mut wait, 50);
+        assert!(wait.is_none(), "a settled failure ends the wait");
+        assert!(super::bridge::player(&pages).is_none(), "no playback starts");
+        drain_slot();
+    }
+}
+
+/// The end of a settled alt-play fetch: play the fetched copy's hero (a show's on-deck episode,
+/// else a movie leaf at version 0 — a picked copy carries no picker choice), or open its page
+/// when nothing is playable. Mirrors [`request_loaded_hero`], but over the handed record instead
+/// of the store slot, which keeps the page's item throughout.
+fn request_fetched_hero(
+    ps: &mut plx_media::route::PlaybackSession,
+    meta: &mut plx_data::stores::metadata::MetadataStore,
+    d: &plx_data::metadata::Detail,
+    from_start: bool,
+) -> Option<i64> {
+    if d.is_show {
+        let ep = plx_data::metadata::Detail::hero_episode(d).or_else(|| d.episodes.first())?.clone();
+        meta.run(plx_data::stores::metadata::MetadataCmd::SetNowPlaying(Some(
+            plx_data::metadata::NowPlaying::episode_of(d, &ep),
+        )));
+        let title = if ep.title.is_empty() { &d.title } else { &ep.title };
+        let context = format!("{}  ·  {}", d.title, plx_ui::fmt::episode_ordinal(ep.season, ep.index));
+        plx_media::route::request_play(
+            ps, meta, plx_media::route::item_sid(d.sid), &ep.rk, &ep.part,
+            &ep.vcodec, &ep.acodec, title, &context, 0,
+        )
+        .then(|| {
+            if from_start {
+                0
+            } else {
+                plx_data::metadata::resume_ns(ep.resume_ms, ep.dur_ms)
+            }
+        })
+    } else if d.kind == "movie" {
+        meta.run(plx_data::stores::metadata::MetadataCmd::SetNowPlaying(Some(
+            plx_data::metadata::NowPlaying::movie_of(d),
+        )));
+        plx_media::route::request_play(
+            ps, meta, plx_media::route::item_sid(d.sid), &d.rk, &d.part,
+            &d.vcodec, &d.acodec, &d.title, "", 0,
+        )
+        .then(|| {
+            if from_start {
+                0
+            } else {
+                plx_data::metadata::resume_ns(d.resume_ms, d.dur_ms)
+            }
+        })
+    } else {
+        None
+    }
+}
+
 fn request_episode(ps: &mut plx_media::route::PlaybackSession, meta: &mut plx_data::stores::metadata::MetadataStore, d: &plx_data::metadata::Detail, ep: &plx_data::metadata::Episode) -> bool {
-    meta.run(plx_data::stores::metadata::MetadataCmd::SetNowPlaying(Some(plx_data::metadata::NowPlaying {
-        is_episode: true, is_real_episode: true, title: d.title.clone(), ep_title: ep.title.clone(),
-        season: ep.season, index: ep.index, summary: ep.summary.clone(),
-        year: ep.aired.get(..4).and_then(|s| s.parse().ok()).unwrap_or(0),
-        dur_ms: ep.dur_ms, rating: ep.rating.clone(), thumb: ep.thumb.clone(), detail_rk: d.rk.clone(),
-    })));
+    meta.run(plx_data::stores::metadata::MetadataCmd::SetNowPlaying(Some(plx_data::metadata::NowPlaying::episode_of(d, ep))));
     let title = if ep.title.is_empty() { &d.title } else { &ep.title };
     let context = format!("{}  ·  {}", d.title, plx_ui::fmt::episode_ordinal(ep.season, ep.index));
     // The deck/Up-Next episode path carries no picker choice: version 0.

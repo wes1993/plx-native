@@ -31,26 +31,23 @@
 //! it is deliberately not a question about this panel: a screen must never have to mount a surface
 //! to find out how many columns its own footer has.
 //!
-//! **The tick marks the copy you are on now**, and the badge is the RESOLUTION class — the
-//! vocabulary the hero's badges row already speaks (`ui::fmt::resolution`, one spelling of "4K" in
-//! the product). A row is `[library] [owner · runtime] [class]`: the label answers *which library*,
-//! the sub-line *whose*, the badge *what you would get*.
+//! **The tick marks the CHOSEN copy** — the page's own item until the viewer picks another —
+//! and the badge is the RESOLUTION class — the vocabulary the hero's badges row already speaks
+//! (`ui::fmt::resolution`, one spelling of "4K" in the product). A row is `[library] [owner ·
+//! runtime] [class]`: the label answers *which library*, the sub-line *whose*, the badge *what
+//! you would get*.
 //!
-//! **OK NAVIGATES.** It opens that server's own page for the film; it does not swap the copy under
-//! you. That is also what settles the per-server progress problem: **a RESUME POSITION does not
-//! travel between servers** — it is about a file you are streaming from one host — so a design that
-//! switched the copy in place would have had to explain a resume position that jumped. Navigating
-//! makes it self-evident: you are on a different page, and it says where you are in *that* copy.
-//! Like every other menu here this surface only REPORTS the choice; it delivers
-//! [`AppMsg::AltSourceOpen`] to the Detail instance named by its argument and the PAGE performs the
-//! navigation, which is `LibraryMenu`'s shape and keeps one owner of "what a press means here".
+//! **OK CHOOSES, it does not navigate.** Picking a row only moves the tick; the page stays, with
+//! no fetch and no reload. The hero's Play (or Resume) starts the ticked copy straight into the
+//! player, without opening its page. That is the whole of what the old navigate-on-OK did not
+//! do: opening the copy's page meant a fresh fetch with a spinner on grey, which read as the
+//! detail page reloading from under you on what was only ever meant as a choice. Like every
+//! other menu here this surface only REPORTS the choice; it delivers
+//! [`AppMsg::AltSourceChosen`] to the Detail instance named by its argument and the PAGE
+//! remembers it — the *Versions* panel's shape, whose tick this one mirrors.
 //!
-//! This paragraph said "watch state does not travel between servers" flat, and half of that stopped
-//! being true when [`plx_data::viewstate`] began fanning a Mark as Watched out over every source
-//! holding the guid. The two halves are not the same claim and the split is the whole point: the
-//! **watched flag follows the TITLE** (having seen a film is not a fact about a host), while the
-//! **offset stays with the copy**. Nothing here changed — this panel still navigates rather than
-//! swaps, for the reason above, which is about the offset.
+//! The resume position stays per-copy: Play resolves the ticked copy's own viewOffset from its
+//! own fetch, so choosing across servers never drags one file's position onto another's.
 //!
 //! **Ordering is the copy that PLAYS first**, then what a viewer would prefer: higher quality
 //! first, and at equal quality yours before a friend's, because yours cannot go offline mid-film.
@@ -85,7 +82,7 @@ use std::convert::Infallible;
 
 use plx_data::metadata::AltCopy;
 use plx_plex::plex::ServerId;
-use crate::registry::{AppLike, AppMsg, ContentArg, PageMemory};
+use crate::registry::{AppLike, AppMsg, PageMemory};
 use plx_ui::frame::Budget;
 use plx_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind,
@@ -104,21 +101,31 @@ use plx_ui::{theme, Rect};
 /// selected ROW is in it deliberately: this panel's UP/DOWN changes nothing else in the app, so
 /// without it a replay grades the panel opening and closing and nothing between.
 pub const SHAPE: [&str; 2] = [
-    "AltSourcesScreen{arg:AltSourcesArg{host:u32,sid:u32,rk:str,anchor:[u32;4]},rows:[{sid:u32,rk:str,label:str,detail:str,value:opt<str>,badge:opt<str>,checked:bool}],sel:i32,table:TableViewMotion}",
+    "AltSourcesScreen{arg:AltSourcesArg{host:u32,sid:u32,rk:str,choice:opt<{sid:u32,rk:str}>,anchor:[u32;4]},rows:[{sid:u32,rk:str,label:str,detail:str,value:opt<str>,badge:opt<str>,checked:bool}],sel:i32,table:TableViewMotion}",
     TableView::MOTION_SHAPE,
 ];
+
+/// One picked copy: which server's which item. The tick's whole identity — the page remembers it
+/// (`DetailScreen::alt_choice`) and the hero's Play starts it straight into the player.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct AltChoice {
+    pub sid: ServerId,
+    pub rk: String,
+}
 
 /// What the container is asked to present.
 ///
 /// `host` is the Detail instance the choice is reported back to; it rides on the argument rather
-/// than being looked up, for `LibraryMenuArg`'s reason — the entry outlives any one frame's idea of
-/// which page is on top. `sid`/`rk` are the copy the page is STANDING ON: the tick's other half,
-/// and the pair the addressed store is read with.
+/// than being looked up, for `AltSourcesArg`'s reason — the entry outlives any one frame's idea of
+/// which page is on top. `sid`/`rk` are the copy the page is STANDING ON: the pair the addressed
+/// store is read with. `choice` is the copy the page has picked, if it picked another one: the
+/// tick's other half.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AltSourcesArg {
     pub host: InstanceId,
     pub sid: ServerId,
     pub rk: String,
+    pub choice: Option<AltChoice>,
     /// Bit-preserving rest rectangle of the pill that opened it; valid in canonical arguments
     /// without float equality.
     pub anchor: [u32; 4],
@@ -127,6 +134,14 @@ pub struct AltSourcesArg {
 impl LogicalState for AltSourcesArg {
     fn write(&self, c: &mut Canon) {
         c.u32(self.host.0).u32(u32::from(self.sid.raw())).str(&self.rk);
+        match &self.choice {
+            Some(choice) => {
+                c.bool(true).u32(u32::from(choice.sid.raw())).str(&choice.rk);
+            }
+            None => {
+                c.bool(false).u32(u32::from(ServerId::UNSET.raw())).str("");
+            }
+        }
         for value in self.anchor {
             c.u32(value);
         }
@@ -212,22 +227,32 @@ pub struct AltRow {
 fn own_account() -> &'static str { plx_platform::i18n::msg::browse_account_own() }
 
 /// Build the panel's rows from `list`, given the copy the page is standing on (`here_sid` +
-/// `here_rk`). PURE — every ordering and marking decision in this module is here, and the host
-/// suite drives it directly.
+/// `here_rk`) and the copy it has picked, if it picked another one (`choice`). PURE — every
+/// ordering and marking decision in this module is here, and the host suite drives it directly.
 ///
 /// **Exactly one row is ticked**, by construction: the mark is placed on the FIRST copy matching
-/// the page's own (server, ratingKey), so a producer that listed the same copy twice still yields
-/// one "you are here" rather than two. A list with no such copy is ticked nowhere at all — which
-/// is the honest answer while a landing is being reconciled, and never two.
+/// the choice, else the first matching the page's own pair — so a producer that listed the same
+/// copy twice still yields one tick, never two. A list matching neither is ticked nowhere at all
+/// — which is the honest answer while a landing is being reconciled, and never two.
 ///
-/// The order is the design's: the copy that plays first, then higher quality, then yours before a
-/// friend's, then by library name so the list cannot reshuffle between two frames that resolved
-/// the same facts.
-pub fn rows(list: &[AltCopy], here_sid: ServerId, here_rk: &str) -> Vec<AltRow> {
+/// The order is the design's: the page's own copy first, then higher quality, then yours before
+/// a friend's, then by library name so the list cannot reshuffle between two frames that
+/// resolved the same facts. The tick follows the choice, not the order: picking never re-sorts.
+pub fn rows(
+    list: &[AltCopy],
+    here_sid: ServerId,
+    here_rk: &str,
+    choice: Option<(ServerId, &str)>,
+) -> Vec<AltRow> {
     // `same_item`, not a hand-rolled `&&`: it is the one place the pair rule lives, and its own doc
     // promises every stored-item lookup routes through it. These two sites were the last that did
     // not — and they are the ones that decide which row wears the tick and which press does nothing.
-    let here = list
+    let tick_on = |c: &AltCopy| {
+        choice.is_some_and(|(sid, rk)| plx_plex::plex::same_item((c.sid, &c.rk), (sid, rk)))
+            || choice.is_none() && plx_plex::plex::same_item((c.sid, &c.rk), (here_sid, here_rk))
+    };
+    let here = list.iter().position(|c| tick_on(c));
+    let here_page = list
         .iter()
         .position(|c| plx_plex::plex::same_item((c.sid, &c.rk), (here_sid, here_rk)));
     let mut idx: Vec<usize> = (0..list.len()).collect();
@@ -235,13 +260,30 @@ pub fn rows(list: &[AltCopy], here_sid: ServerId, here_rk: &str) -> Vec<AltRow> 
         let (ca, cb) = (&list[a], &list[b]);
         // `false` sorts before `true`, so each key is written as "the one that loses"
         (
-            here != Some(a),
+            here_page != Some(a),
             std::cmp::Reverse(scan_lines(ca)),
             ca.owner.is_some(),
             &ca.library,
         )
             .cmp(&(
-                here != Some(b),
+                here_page != Some(b),
+                std::cmp::Reverse(scan_lines(cb)),
+                cb.owner.is_some(),
+                &cb.library,
+            ))
+    });
+    let mut idx: Vec<usize> = (0..list.len()).collect();
+    idx.sort_by(|&a, &b| {
+        let (ca, cb) = (&list[a], &list[b]);
+        // `false` sorts before `true`, so each key is written as "the one that loses"
+        (
+            here_page != Some(a),
+            std::cmp::Reverse(scan_lines(ca)),
+            ca.owner.is_some(),
+            &ca.library,
+        )
+            .cmp(&(
+                here_page != Some(b),
                 std::cmp::Reverse(scan_lines(cb)),
                 cb.owner.is_some(),
                 &cb.library,
@@ -268,7 +310,7 @@ pub fn rows(list: &[AltCopy], here_sid: ServerId, here_rk: &str) -> Vec<AltRow> 
         .collect()
 }
 
-/// One row's drawing: its four content places. The tick is WHICH copy you are on, the label WHICH
+/// One row's drawing: its four content places. The tick is the CHOSEN copy, the label WHICH
 /// LIBRARY (a server's name), the sub-line WHOSE (another person's name, or this app's "This
 /// account"), the read-out HOW LONG and the badge WHAT YOU GET.
 fn row_for(r: &AltRow) -> Row {
@@ -289,17 +331,19 @@ fn row_for(r: &AltRow) -> Row {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     None,
-    /// Open `rk` on server `sid` — that copy's own page. Never a swap of the copy in place.
-    Open { sid: ServerId, rk: String },
+    /// Choose `rk` on server `sid` — move the tick, stay on the page. The hero's Play starts the
+    /// ticked copy straight into the player.
+    Choose { sid: ServerId, rk: String },
 }
 
-/// What one row's OK means, decided once when the row is declared, so the "the row you are on is
-/// not a destination" rule is host-testable and no press ever indexes a list.
-pub fn action_for(row: &AltRow, here_sid: ServerId, here_rk: &str) -> Action {
-    if plx_plex::plex::same_item((row.sid, &row.rk), (here_sid, here_rk)) || row.rk.is_empty() {
+/// What one row's OK means, decided once when the row is declared: every resolvable row chooses
+/// its copy, so the "which press" question never indexes a list. A copy with no ratingKey names
+/// nothing playable and stays inert.
+pub fn action_for(row: &AltRow) -> Action {
+    if row.rk.is_empty() {
         return Action::None;
     }
-    Action::Open {
+    Action::Choose {
         sid: row.sid,
         rk: row.rk.clone(),
     }
@@ -325,14 +369,14 @@ impl AltId {
 }
 
 /// The panel's one section, declared from the resolved rows alone (pure, so the text-fit suite
-/// drives it): every row carries its own destination ([`action_for`]). The dynamic rows' focus key
+/// drives it): every row carries its own choice ([`action_for`]). The dynamic rows' focus key
 /// is their position in the list (docs/settings-form.md, "Dynamic rows"): the list is one
 /// unheaded section whose length and order the store decides.
-pub fn form_for(rows: &[AltRow], here_sid: ServerId, here_rk: &str) -> Form<AltId, Action, Infallible> {
+pub fn form_for(rows: &[AltRow]) -> Form<AltId, Action, Infallible> {
     let mut sec = FormSection::new("");
     for (pos, r) in rows.iter().enumerate() {
         let id = AltId::of(rows, pos);
-        sec = sec.item_keyed(id, RowKey(pos as u32), RowKind::Choice, action_for(r, here_sid, here_rk), row_for(r));
+        sec = sec.item_keyed(id, RowKey(pos as u32), RowKind::Choice, action_for(r), row_for(r));
     }
     Form::new().section(sec)
 }
@@ -341,9 +385,9 @@ pub fn form_for(rows: &[AltRow], here_sid: ServerId, here_rk: &str) -> Form<AltI
 
 /// Where the selection lands when the table is rebuilt.
 enum Sel {
-    /// Opening: on the copy you are on — the row the tick is against — because that is where the
-    /// eye already is, and one DOWN from it is the alternative.
-    OnTheCopyYouAreOn,
+    /// Opening: on the ticked copy — because that is where the eye already is, and one DOWN
+    /// from it is the alternative.
+    OnTheTick,
     /// Rebuilding under an OPEN panel: leave the cursor where the user put it.
     Keep,
 }
@@ -365,23 +409,25 @@ impl AltSourcesScreen {
             rows: Vec::new(),
             form: FormTable::new(plx_ui::table_screen::BAND_BASE),
         };
-        screen.rebuild(Sel::OnTheCopyYouAreOn, meta);
+        screen.rebuild(Sel::OnTheTick, meta);
         screen
     }
 
-    /// The rows the store would produce right now, marked against **the server the open PAGE
-    /// belongs to** and the item it is showing.
+    /// The rows the store would produce right now, ticked against the page's PICKED copy if it
+    /// picked another one, else the copy the page is standing on.
     ///
     /// The page's server, not `plex::current_server()`. Those were the same thing only while
     /// browsing a shared library also re-pointed `current`; once that stopped, opening a borrowed
     /// film left `current` on our own server, no copy matched the pair, and the panel drew **no
-    /// tick at all** — owner-reported. The tick answers "which of these am I looking at", and only
-    /// the page knows; since phase 10 it says so on the argument.
+    /// tick at all** — owner-reported. The tick answers "which of these is chosen", and only
+    /// the page knows; it says so on the argument.
     fn live_rows(&self, meta: plx_data::metadata::MetadataView<'_>) -> Vec<AltRow> {
+        let choice = self.arg.choice.as_ref().map(|c| (c.sid, c.rk.as_str()));
         rows(
             meta.alt_copies(self.arg.sid, &self.arg.rk),
             self.arg.sid,
             &self.arg.rk,
+            choice,
         )
     }
 
@@ -397,10 +443,10 @@ impl AltSourcesScreen {
     }
 
     fn rebuild(&mut self, sel_mode: Sel, meta: plx_data::metadata::MetadataView<'_>) {
-        if matches!(sel_mode, Sel::OnTheCopyYouAreOn) {
+        if matches!(sel_mode, Sel::OnTheTick) {
             self.rows = self.live_rows(meta);
         }
-        let form = form_for(&self.rows, self.arg.sid, &self.arg.rk);
+        let form = form_for(&self.rows);
         // rows carry a sub-line — the track menu's size class, not the account popover's
         self.form.table.compact = false;
         match sel_mode {
@@ -409,8 +455,8 @@ impl AltSourcesScreen {
                 let held = self.form.selected_id().cloned();
                 self.form.set(form, held.as_ref());
             }
-            // on the copy you are on (the tick), else the first row
-            Sel::OnTheCopyYouAreOn => {
+            // on the ticked copy, else the first row
+            Sel::OnTheTick => {
                 let here = self.rows.iter().position(|r| r.checked).map(|pos| AltId::of(&self.rows, pos));
                 self.form.set(form, here.as_ref());
             }
@@ -426,8 +472,8 @@ impl AltSourcesScreen {
         fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
     }
 
-    /// Commit row `elem` and close. The row you are ALREADY on reports nothing — there is nowhere
-    /// to navigate to, and the tick has already answered the question the press was asking.
+    /// Commit row `elem` and close. The row only REPORTS which copy: the PAGE remembers the
+    /// choice and the hero's Play starts it — nothing navigates here.
     ///
     /// Takes the elem directly rather than reading the table's cursor: the engine's OK arm reads it
     /// off the current focus key and a pointer click's `Activate` names the STOP that was clicked,
@@ -439,15 +485,13 @@ impl AltSourcesScreen {
             _ => Action::None,
         };
         self.dismiss(fx);
-        if let Action::Open { sid, rk } = action {
-            // The PAGE navigates. This surface names the destination and nothing else — the
-            // `LibraryMenu` shape, and what keeps "what a press means on the Detail page" in one
-            // place instead of two.
+        if let Action::Choose { sid, rk } = action {
+            // The PAGE remembers. This surface names WHICH copy and nothing else — the
+            // *Versions* panel's shape, and what keeps "what a press means on the Detail page"
+            // in one place instead of two.
             fx.push(Fx::Deliver(
                 MachineId::Instance(self.arg.host),
-                Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceOpen(
-                    ContentArg::Detail { sid, rk },
-                ))),
+                Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceChosen { sid, rk })),
             ));
         }
     }

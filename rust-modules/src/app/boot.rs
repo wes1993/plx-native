@@ -2041,6 +2041,7 @@ pub(crate) unsafe fn construct(
         last_route_reported,
         ptr,
         menu_play_await: None,
+        alt_play_wait: None,
         prev,
         refresh_hubs,
         return_hold: Default::default(),

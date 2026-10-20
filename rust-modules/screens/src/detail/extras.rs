@@ -146,6 +146,7 @@ mod tests {
                 assert_eq!(context, plx_data::metadata::EXTRA_CONTEXT);
             }
             PlayIntent::Movie(_) => panic!("an extra is not the parent movie"),
+            PlayIntent::Copy { .. } => panic!("an extra is not an Also-available copy"),
         }
         assert!(play(&d, elem(1).unwrap()).is_none());
     }

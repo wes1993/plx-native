@@ -90,7 +90,7 @@ const COMPACT_TITLE_FADE: f32 = 200.0;
 const K_SCROLL: f32 = plx_ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
 
-pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,reasked:bool,covered:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
+pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,reasked:bool,covered:bool,alt_choice:opt<{sid:u32,rk:str}>,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 // The blocks packed end to end: each section starts where the one before it ends, so the chain
 // proves they are disjoint. The episodes come last, at 2^30, and end where the engine keys begin.
@@ -259,6 +259,10 @@ pub struct DetailScreen {
     /// A Play press waiting on the picker's answer, carrying whether it was Play-from-Start.
     /// Transient — the answer lands within a frame or two — so it is deliberately NOT hashed.
     version_ask: Option<bool>,
+    /// The *Also available* copy the viewer picked, if it picked another one: the ticked row.
+    /// Picking the page's own copy clears it. A LOGICAL decision (the hero's Play starts it
+    /// straight into the player instead of the page's own item), so it is hashed into [`SHAPE`].
+    alt_choice: Option<crate::alt_sources::AltChoice>,
     /// This page already spent its one recovery re-request for the current absence epoch
     /// ([`Self::reask_detail`]). A LOGICAL decision (it changes whether a `StoreChanged` asks the
     /// server again), so it is hashed into [`SHAPE`]; cleared on `Enter` and whenever the item is
@@ -589,6 +593,7 @@ impl DetailScreen {
             version: 0,
             version_chosen: false,
             version_ask: None,
+            alt_choice: None,
             reasked: false,
             covered: false,
             restore_intent: None,
@@ -2293,10 +2298,16 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                 fx.invalidate(Provenance::Landing(fx.from()));
                 Handled::Yes
             }
-            // The *Also available* surface committed a row. It names the destination; this page
-            // performs the navigation, exactly as it did while the panel reported an `Action`.
-            ScreenEvent::App(AppMsg::AltSourceOpen(arg)) => {
-                self.content(fx, ContentReq::Present(arg.clone()));
+            // The *Also available* surface committed a row. It names WHICH copy and nothing
+            // else — the panel only REPORTS, exactly as the *Versions* surface does — and this
+            // page remembers it as its chosen copy. Nothing navigates and nothing plays: the
+            // hero's Play starts the ticked copy straight into the player. Picking the page's
+            // own copy clears the choice back to the default.
+            ScreenEvent::App(AppMsg::AltSourceChosen { sid, rk }) => {
+                self.alt_choice =
+                    (!plx_plex::plex::same_item((*sid, rk.as_str()), (self.sid, self.rk.as_str())))
+                    .then(|| crate::alt_sources::AltChoice { sid: *sid, rk: rk.clone() });
+                fx.invalidate(Provenance::Input);
                 Handled::Yes
             }
             // The version picker committed a row. It names WHICH version and nothing else — the
@@ -3512,6 +3523,14 @@ impl LogicalState for DetailScreen {
             DetailRefreshPhase::Requested => 2,
         });
         w.u32(self.version as u32).bool(self.version_chosen).bool(self.reasked).bool(self.covered);
+        match &self.alt_choice {
+            Some(choice) => {
+                w.bool(true).u32(u32::from(choice.sid.raw())).str(&choice.rk);
+            }
+            None => {
+                w.bool(false).u32(u32::from(ServerId::UNSET.raw())).str("");
+            }
+        }
         match &self.restore_intent {
             Some(intent) => {
                 w.bool(true)
@@ -4486,7 +4505,11 @@ impl DetailScreen {
                 if let Some(anchor) = self.hero_anchor(ctl, cx, meta) {
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
-                    self.content(fx, ContentReq::Panel(ContentPanel::AltSources { anchor }));
+                    // The CHOICE travels beside it, so the tick answers the pick, not the page.
+                    self.content(fx, ContentReq::Panel(ContentPanel::AltSources {
+                        anchor,
+                        choice: self.alt_choice.clone(),
+                    }));
                 }
             }
             // The bookmark disc: the press is the item menu's own write (`Action::WatchlistAdd` /
@@ -4532,6 +4555,20 @@ impl DetailScreen {
         fx: &mut Effects<'_, H>,
         meta: plx_data::metadata::MetadataView<'_>,
     ) -> bool {
+        // A picked Also-available copy plays straight off this page: no navigation to the copy's
+        // page, no fetch through the store slot (which would blank this page). The loop resolves
+        // the copy off-frame and starts it; the resume point comes from the copy's own record.
+        if let Some(choice) = self.alt_choice.as_ref().filter(|c| {
+            !plx_plex::plex::same_item((c.sid, &c.rk), (self.sid, &self.rk))
+        }) {
+            let play = PlayIntent::Copy {
+                sid: choice.sid,
+                rk: choice.rk.clone(),
+                from_start,
+            };
+            self.content(fx, ContentReq::Play { play, resume_ns: 0 });
+            return true;
+        }
         let Some(d) = self.detail(meta) else { return false };
         // **A leaf with a real choice and no pick yet ASKS rather than guesses** — the FastPlex
         // behaviour this picker exists for. The picker's answer starts the play
@@ -4562,7 +4599,7 @@ impl DetailScreen {
             // A version the picker chose is built from the LOADED item's own record; only version 0
             // may take the catalog row, which carries `Media[0]`'s part and codecs.
             let play = self.selected().filter(|_| version == 0).map_or_else(
-                || self.version_intent(d, version, String::new()),
+                || Self::version_intent(d, version, String::new()),
                 |m| PlayIntent::Movie(m.clone()),
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
@@ -4573,7 +4610,7 @@ impl DetailScreen {
 
     /// The [`PlayIntent::Item`] for the leaf `d` at `version` — the version's own part and source
     /// codecs where the picker holds them, else the flattened block (which IS version 0).
-    fn version_intent(&self, d: &Detail, version: usize, context: String) -> PlayIntent {
+    fn version_intent(d: &Detail, version: usize, context: String) -> PlayIntent {
         let v = d.versions.get(version);
         PlayIntent::Item {
             sid: plx_media::route::item_sid(d.sid),
@@ -4585,6 +4622,60 @@ impl DetailScreen {
             context,
             version,
         }
+    }
+
+    /// The Play press computed against an explicitly handed leaf — the same decision
+    /// [`DetailScreen::play_hero`] makes for its loaded item, minus the page's own state: no
+    /// picker gate (a picked copy plays at version 0), no catalog row, no season-settle wait.
+    /// What an Also-available copy picked off its page plays straight into the player: the
+    /// worker fetches the copy's whole record off the frame thread and the loop plays this,
+    /// without the copy ever entering the store slot (which would blank the page being looked
+    /// at). `None` for a kind with nothing playable (a show with no episode): the caller opens
+    /// the copy's page instead, exactly as a failed menu Play does.
+    pub fn play_for_leaf(d: &Detail, from_start: bool) -> Option<(PlayIntent, i64, plx_data::metadata::NowPlaying)> {
+        if d.is_show {
+            let ep = hero::hero_episode(d).or_else(|| d.episodes.first())?;
+            let (intent, now) = Self::episode_play_parts(d, ep, 0);
+            let resume_ns = play_resume_ns(from_start, ep.resume_ms, ep.dur_ms);
+            Some((intent, resume_ns, now))
+        } else if d.kind == "movie" {
+            let intent = Self::version_intent(d, 0, String::new());
+            let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
+            Some((intent, resume_ns, plx_data::metadata::NowPlaying::movie_of(d)))
+        } else {
+            None
+        }
+    }
+
+    /// The pure core of a show-episode press: which stream, which caption, at which version — no
+    /// store write, no navigation. [`DetailScreen::play_episode_value`] applies it to the loaded
+    /// item (with the page's own version); [`play_for_leaf`] to a fetched copy (version 0).
+    fn episode_play_parts(
+        d: &Detail,
+        ep: &plx_data::metadata::Episode,
+        version: usize,
+    ) -> (PlayIntent, plx_data::metadata::NowPlaying) {
+        let v = ep.versions.get(version);
+        let part = v.map_or_else(|| ep.part.clone(), |v| v.part.clone());
+        let vcodec = v.map_or_else(|| ep.vcodec.clone(), |v| v.vcodec.clone());
+        let acodec = v.map_or_else(|| ep.acodec.clone(), |v| v.acodec.clone());
+        let title = if ep.title.is_empty() {
+            d.title.clone()
+        } else {
+            ep.title.clone()
+        };
+        let context = format!("{}  \u{b7}  {}", d.title, plx_ui::fmt::episode_ordinal(ep.season, ep.index));
+        let play = PlayIntent::Item {
+            sid: plx_media::route::item_sid(d.sid),
+            rk: ep.rk.clone(),
+            part,
+            vcodec,
+            acodec,
+            title,
+            context,
+            version,
+        };
+        (play, plx_data::metadata::NowPlaying::episode_of(d, ep))
     }
 
     fn play_episode_at<H: ContentLike>(
@@ -4609,57 +4700,15 @@ impl DetailScreen {
         fx: &mut Effects<'_, H>,
     ) -> bool {
         let Some(ep) = episode else { return false };
-        // Clone the complete command/request payload before the store write. `Detail` and
-        // `Episode` live in the metadata store's replaceable slot; no borrow of either may cross a
-        // mutation, even when this particular command currently replaces only NowPlaying.
-        let sid = d.sid;
-        let play_rk = ep.rk.clone();
         // The page's pick, against THIS episode's own `Media[]` (the index is per-leaf, which is
         // what makes it mean the same thing on the hero episode and on one clicked in the strip).
         let version = self.clamp_version(&ep.versions);
-        let v = ep.versions.get(version);
-        let part = v.map_or_else(|| ep.part.clone(), |v| v.part.clone());
-        let vcodec = v.map_or_else(|| ep.vcodec.clone(), |v| v.vcodec.clone());
-        let acodec = v.map_or_else(|| ep.acodec.clone(), |v| v.acodec.clone());
-        let title = if ep.title.is_empty() {
-            d.title.clone()
-        } else {
-            ep.title.clone()
-        };
-        let context = format!("{}  \u{b7}  {}", d.title, plx_ui::fmt::episode_ordinal(ep.season, ep.index));
+        let (play, now_playing) = Self::episode_play_parts(d, ep, version);
         let resume_ns = play_resume_ns(from_start, ep.resume_ms, ep.dur_ms);
-        let now_playing = plx_data::metadata::NowPlaying {
-            is_episode: true,
-            is_real_episode: true,
-            title: d.title.clone(),
-            ep_title: ep.title.clone(),
-            season: ep.season,
-            index: ep.index,
-            summary: ep.summary.clone(),
-            year: ep
-                .aired
-                .get(0..4)
-                .and_then(|year| year.parse::<i64>().ok())
-                .unwrap_or(0),
-            dur_ms: ep.dur_ms,
-            rating: ep.rating.clone(),
-            thumb: ep.thumb.clone(),
-            detail_rk: d.rk.clone(),
-        };
         fx.push(Fx::App(AppFx::Store(
             StoreId::Metadata,
             StoreCmd::Metadata(MetadataCmd::SetNowPlaying(Some(now_playing))),
         )));
-        let play = PlayIntent::Item {
-            sid: plx_media::route::item_sid(sid),
-            rk: play_rk,
-            part,
-            vcodec,
-            acodec,
-            title,
-            context,
-            version,
-        };
         self.content(fx, ContentReq::Play { play, resume_ns });
         true
     }

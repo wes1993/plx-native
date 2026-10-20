@@ -77,6 +77,7 @@ fn panel(host_sid: ServerId, rk: &str) -> AltSourcesScreen {
             host: InstanceId(1),
             sid: host_sid,
             rk: rk.to_string(),
+            choice: None,
             anchor: [0.0f32, 0.0, 100.0, 40.0].map(f32::to_bits),
         },
         test_store().view(),
@@ -86,7 +87,7 @@ fn panel(host_sid: ServerId, rk: &str) -> AltSourcesScreen {
 /// The one section the screen draws for `list`, built through the same [`form_for`].
 fn section_for(list: &[AltRow]) -> plx_ui::table::Section {
     let mut t = FormTable::<AltId, Action, std::convert::Infallible>::new(plx_ui::table_screen::BAND_BASE);
-    t.set(form_for(list, sid(0), "0"), None);
+    t.set(form_for(list), None);
     t.table.sections.remove(0)
 }
 
@@ -148,7 +149,7 @@ fn the_copy_that_plays_comes_first_and_the_rest_rank_by_preference() {
         copy(1, "Film Club", "friend", "318", "4k"),
         copy(0, "Movies", "", "4", "1080"),
     ];
-    let rs = rows(&list, sid(0), "4");
+    let rs = rows(&list, sid(0), "4", None);
     assert_eq!(
         labels(&rs),
         ["Movies", "Film Club"],
@@ -168,7 +169,7 @@ fn the_copy_that_plays_comes_first_and_the_rest_rank_by_preference() {
     );
 
     // …and standing on the OTHER copy inverts only the first key, not the rest
-    assert_eq!(labels(&rows(&list, sid(1), "318")), ["Film Club", "Movies"]);
+    assert_eq!(labels(&rows(&list, sid(1), "318", None)), ["Film Club", "Movies"]);
 }
 
 /// Below the copy that plays, quality decides — and only at EQUAL quality does "yours cannot go
@@ -190,6 +191,7 @@ fn quality_outranks_ownership_and_ownership_breaks_the_tie() {
         ],
         sid(9),
         "1",
+        None,
     );
     assert_eq!(
         labels(&rs),
@@ -198,7 +200,7 @@ fn quality_outranks_ownership_and_ownership_breaks_the_tie() {
     );
 
     // the input order must not decide anything — the same set shuffled sorts identically
-    let shuffled = rows(&[theirs_hd, theirs_4k, mine, here], sid(9), "1");
+    let shuffled = rows(&[theirs_hd, theirs_4k, mine, here], sid(9), "1", None);
     assert_eq!(labels(&shuffled), labels(&rs));
 }
 
@@ -253,7 +255,7 @@ fn exactly_one_row_is_ever_ticked() {
         copy(0, "Movies", "", "4", "1080"),
         copy(1, "Film Club", "friend", "318", "4k"),
     ];
-    let rs = rows(&list, sid(0), "4");
+    let rs = rows(&list, sid(0), "4", None);
     assert_eq!(ticked(&rs), 1);
     assert!(
         rs[0].checked,
@@ -267,7 +269,7 @@ fn exactly_one_row_is_ever_ticked() {
         copy(1, "LDN", "b", "318", "4k"),
     ];
     assert_eq!(
-        ticked(&rows(&dup, sid(0), "4")),
+        ticked(&rows(&dup, sid(0), "4", None)),
         1,
         "one identity cannot be two 'you are here's"
     );
@@ -280,15 +282,40 @@ fn exactly_one_row_is_ever_ticked() {
                 copy(1, "LDN", "b", "4", "4k")
             ],
             sid(0),
-            "4"
+            "4",
+            None
         )),
         1
     );
     // …and nothing is ticked when the page's copy is not in the list yet
     assert_eq!(
-        ticked(&rows(&list, sid(7), "4")),
+        ticked(&rows(&list, sid(7), "4", None)),
         0,
         "no guess, no second tick"
+    );
+}
+
+/// **The tick follows the pick, not the page.** Once the viewer chooses another copy, exactly
+/// that row is marked however many times the page's own copy appears — and the order does not
+/// move with it.
+#[test]
+fn the_tick_follows_the_picked_copy() {
+    let ticked = |rs: &[AltRow]| rs.iter().filter(|r| r.checked).count();
+
+    let list = [
+        copy(0, "Movies", "", "4", "1080"),
+        copy(1, "Film Club", "friend", "318", "4k"),
+    ];
+    let rs = rows(&list, sid(0), "4", Some((sid(1), "318")));
+    assert_eq!(ticked(&rs), 1);
+    assert!(
+        rs[1].checked,
+        "the tick is on the picked copy, not the page's"
+    );
+    assert_eq!(
+        labels(&rows(&list, sid(0), "4", Some((sid(1), "318")))),
+        labels(&rows(&list, sid(0), "4", None)),
+        "picking never re-sorts the list"
     );
 }
 
@@ -298,13 +325,13 @@ fn exactly_one_row_is_ever_ticked() {
 fn a_copy_with_no_runtime_states_only_its_owner() {
     let mut c = copy(1, "Film Club", "friend", "318", "4k");
     c.dur_ms = 0;
-    let rs = rows(&[c], sid(0), "4");
+    let rs = rows(&[c], sid(0), "4", None);
     assert_eq!(rs[0].detail, "friend");
     assert_eq!(rs[0].value, None, "an unknown runtime is absent, not zero");
     // and one with no video at all carries no badge rather than an empty chip
     let mut n = copy(0, "Movies", "", "4", "");
     n.dur_ms = 0;
-    assert_eq!(rows(&[n], sid(0), "4")[0].badge, None);
+    assert_eq!(rows(&[n], sid(0), "4", None)[0].badge, None);
 }
 
 /// OK NAVIGATES — and the row you are already on is not a destination: it reports nothing, so
@@ -315,7 +342,7 @@ fn a_copy_with_no_runtime_states_only_its_owner() {
 /// a parallel `DESTS` vector is one more thing that can be resolved against a differently-ordered
 /// list, and deleting it is what makes "the row list IS the mapping" true rather than asserted.
 #[test]
-fn ok_navigates_to_another_copy_and_never_to_the_one_you_are_on() {
+fn ok_chooses_a_copy_and_never_navigates() {
     let row = |s: u16, rk: &str| AltRow {
         label: String::new(),
         detail: String::new(),
@@ -328,19 +355,22 @@ fn ok_navigates_to_another_copy_and_never_to_the_one_you_are_on() {
     };
     let list = [row(0, "4"), row(1, "318"), row(2, "")];
     assert_eq!(
-        action_for(&list[0], sid(0), "4"),
-        Action::None,
-        "the copy you are on goes nowhere"
+        action_for(&list[0]),
+        Action::Choose {
+            sid: sid(0),
+            rk: "4".into()
+        },
+        "every resolvable row chooses, even the ticked one"
     );
     assert_eq!(
-        action_for(&list[1], sid(0), "4"),
-        Action::Open {
+        action_for(&list[1]),
+        Action::Choose {
             sid: sid(1),
             rk: "318".into()
         }
     );
     assert_eq!(
-        action_for(&list[2], sid(0), "4"),
+        action_for(&list[2]),
         Action::None,
         "a copy with no ratingKey is not a destination"
     );
@@ -366,7 +396,7 @@ fn the_headless_stand_in_shows_the_case_the_ordering_rule_turns_on() {
     assert_eq!(v[1].owner.as_deref(), Some("friend"));
     assert_eq!(v[1].rk, v[0].rk, "the same film — the slot is what differs");
 
-    let rs = rows(&v, sid(0), "4");
+    let rs = rows(&v, sid(0), "4", None);
     assert!(rs[0].checked, "the tick is on yours…");
     assert_eq!(rs[0].badge.as_deref(), Some("1080p"));
     assert_eq!(
@@ -438,7 +468,7 @@ fn a_re_described_source_restamps_the_credit_on_an_open_page() {
     );
     let copies = || test_store().view().alt_copies(house, "4");
     assert_eq!(
-        rows(copies(), house, "4")
+        rows(copies(), house, "4", None)
             .iter()
             .map(|r| r.detail.clone())
             .collect::<Vec<_>>(),
@@ -449,7 +479,7 @@ fn a_re_described_source_restamps_the_credit_on_an_open_page() {
     plx_plex::plex::describe_server(house, "Mac mini", "", house_evidence());
     assert!(alt_restamp_owners(), "the credit moved");
 
-    let after = rows(copies(), house, "4");
+    let after = rows(copies(), house, "4", None);
     assert_eq!(
         after.iter().map(|r| r.detail.clone()).collect::<Vec<_>>(),
         [own_account(), "friend"],
@@ -557,7 +587,7 @@ fn an_unnamed_external_share_is_drawn_like_the_household_and_that_is_the_open_bu
             copy(2, "Archive", "", "77", "1080"),
         ],
     );
-    let drawn: Vec<String> = rows(test_store().view().alt_copies(house, "4"), house, "4")
+    let drawn: Vec<String> = rows(test_store().view().alt_copies(house, "4"), house, "4", None)
         .iter()
         .map(|r| r.detail.clone())
         .collect();
@@ -731,6 +761,7 @@ fn the_panel_hangs_off_its_button_and_stays_on_screen() {
             host: InstanceId(1),
             sid: ServerId::UNSET,
             rk: String::new(),
+            choice: None,
             anchor: [low.x, low.y, low.w, low.h].map(f32::to_bits),
         },
         plx_data::stores::metadata::MetadataStore::default().view(),
@@ -889,9 +920,10 @@ mod focus_and_hit {
             ],
             here,
             "4",
+            None,
         );
         p.form.table.compact = false;
-        p.form.set(form_for(&p.rows, here, "4"), None);
+        p.form.set(form_for(&p.rows), None);
         (p, here, there)
     }
 
@@ -1012,21 +1044,22 @@ mod focus_and_hit {
         let opened = buf.iter().find_map(|s| match &s.fx {
             plx_machine::machine::Fx::Deliver(
                 plx_machine::machine::MachineId::Instance(h),
-                plx_machine::machine::Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceOpen(
-                    crate::registry::ContentArg::Detail { sid, rk },
-                ))),
+                plx_machine::machine::Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceChosen {
+                    sid,
+                    rk,
+                })),
             ) if *h == host => Some((*sid, rk.clone())),
             _ => None,
         });
         assert_eq!(opened, Some((there, "9".to_string())), "row 1 is the friend's copy");
     }
 
-    /// **Activating the row you are already standing on reports nothing to navigate to** — the
-    /// pure `action_for` rule the panel's `commit` defers to, exercised here through the same
-    /// `Activate` seam a real OK press now takes.
+    /// **Activating any resolvable row reports the choice** — including the ticked one: choosing
+    /// is re-affirming, and the page (which owns what a press means) decides. Exercised here
+    /// through the same `Activate` seam a real OK press now takes.
     #[test]
-    fn activating_the_current_row_only_dismisses() {
-        let (mut p, ..) = two_row_panel();
+    fn activating_a_row_reports_the_choice() {
+        let (mut p, here, ..) = two_row_panel();
         let entry = p.entry;
         let cx = fixture_cx(Some(FocusKey { entry, elem: 0 }));
         let mut buf = Vec::new();
@@ -1034,10 +1067,17 @@ mod focus_and_hit {
         let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
         let ev = ScreenEvent::Activate(0);
         assert_eq!(Machine::step(&mut p, &ev, &cx, &mut fx), Handled::Yes);
-        assert!(buf.iter().all(|s| !matches!(
-            &s.fx,
-            plx_machine::machine::Fx::Deliver(.., plx_machine::machine::Delivery::Screen(ScreenEvent::App(_)))
-        )));
+        let chosen = buf.iter().find_map(|s| match &s.fx {
+            plx_machine::machine::Fx::Deliver(
+                _,
+                plx_machine::machine::Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceChosen {
+                    sid,
+                    rk,
+                })),
+            ) => Some((*sid, rk.clone())),
+            _ => None,
+        });
+        assert_eq!(chosen, Some((here, "4".to_string())), "even the ticked row reports");
     }
 
     #[test]
@@ -1072,14 +1112,14 @@ fn every_app_owned_run_fits_the_panel_in_every_language() {
         friend.dur_ms = dur_ms;
         list.extend([own, friend]);
     }
-    let built = rows(&list, sid(0), "0");
+    let built = rows(&list, sid(0), "0", None);
     // The cap check needs a fixture whose SERVER text (a friend's handle) is short: the long handle
     // above is exempt from the ellipsis test but would count toward `measured_width`.
     let short: Vec<_> = list.iter().cloned().map(|mut c| {
         if c.owner.is_some() { c.owner = Some("friend".into()); }
         c
     }).collect();
-    let short_built = rows(&short, sid(0), "0");
+    let short_built = rows(&short, sid(0), "0", None);
     let mut out = Vec::new();
     for language in SHIPPED {
         let _guard = language_on_this_thread_for_test(language);

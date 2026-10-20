@@ -809,7 +809,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                 super::content::hold_feature(intent, 0, None);
                 return;
             }
-            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent) {
+            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent, &mut None, now) {
                 return;
             }
             super::playback::start_playback_with(
