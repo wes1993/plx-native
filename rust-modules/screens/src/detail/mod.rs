@@ -2423,7 +2423,10 @@ impl DetailScreen {
     /// Bounded by [`Self::reasked`]: one recovery shot per `Enter` and per new loss, so a
     /// genuinely missing item costs two fetches per visit, never a hot loop (`StoreChanged`
     /// fires for every store note). Skipped while a reconciliation is owed (`refresh`): that
-    /// obligation owns this address and retires on its own terminal.
+    /// obligation owns this address and retires on its own terminal. Skipped while anything is
+    /// playing: the slot belongs to the playback, and a page that asked for itself again would
+    /// land on top of it and overwrite the mailbox (`content::library_publication_tests` guards
+    /// exactly this for an item-menu Play off a detail page).
     fn reask_detail<H: ContentLike>(
         &mut self,
         meta: plx_data::metadata::MetadataView<'_>,
@@ -2435,6 +2438,7 @@ impl DetailScreen {
         }
         if self.reasked
             || self.refresh != DetailRefreshPhase::None
+            || meta.now_playing().is_some()
             || meta.detail_request_status(self.sid, &self.rk) == Some(true)
         {
             return;
