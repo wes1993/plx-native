@@ -1,4 +1,4 @@
-{"updated":"2026-10-20T10:31:57Z",
+{"updated":"2026-10-20T10:38:42Z",
 "ci":[
 {"id":39292589962,"at":"2026-10-19T17:15:42Z","sha":"51157f93d","title":"Version picker + Continue Watching duplicate-poster fixes","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":6,"host lint + type-checks":202,"host harness tests":179,"armv7 cross-build and artifact assertions":423,"host python/shell/C gates":231,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
 {"id":39297053928,"at":"2026-10-19T17:46:54Z","sha":"a19c7a3a5","title":"Deck: one poster per title, across sources too","pr":null,"conclusion":"failure","attempt":1,"jobs":{"which gates apply":7,"host lint + type-checks":134,"host harness tests":187,"host python/shell/C gates":273,"armv7 cross-build and artifact assertions":343,"cross-build (armv7) + artifact assertions":3},"failed":["host checks (NOT a device gate)","host unit tests (default features)","host unit tests (hostsim)"]},
@@ -17,7 +17,8 @@
 {"id":39383007838,"at":"2026-10-20T06:53:08Z","sha":"0716153e1","title":"Stop: release the MDE's own session too, not just the encoder's","pr":null,"conclusion":"failure","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":81,"Windows launcher syntax":18,"Linux simulator build + launch":259},"failed":["macOS simulator build + launch"]},
 {"id":39404421673,"at":"2026-10-20T09:57:11Z","sha":"aec138d5d","title":"Versions pill pick only chooses; Play pick plays","pr":null,"conclusion":"failure","attempt":1,"jobs":{"Windows launcher syntax":20,"Linux simulator build + launch":257,"macOS tests against bundled FFmpeg and ASS":108},"failed":["macOS simulator build + launch"]},
 {"id":39405844332,"at":"2026-10-20T10:08:51Z","sha":"fb23dbb06","title":"Detail: re-ask our item when the slot moved under a live page","pr":null,"conclusion":"failure","attempt":1,"jobs":{"Windows launcher syntax":37,"macOS tests against bundled FFmpeg and ASS":116,"Linux simulator build + launch":254},"failed":["macOS simulator build + launch"]},
-{"id":39407927563,"at":"2026-10-20T10:26:16Z","sha":"0e50f425b","title":"Re-record replay fixtures for the current state shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":116,"Linux simulator build + launch":278,"macOS simulator build + launch":278,"Windows launcher syntax":20}}
+{"id":39407927563,"at":"2026-10-20T10:26:16Z","sha":"0e50f425b","title":"Re-record replay fixtures for the current state shape","pr":null,"conclusion":"success","attempt":1,"jobs":{"macOS tests against bundled FFmpeg and ASS":116,"Linux simulator build + launch":278,"macOS simulator build + launch":278,"Windows launcher syntax":20}},
+{"id":39408842682,"at":"2026-10-20T10:34:00Z","sha":"a40ed3aef","title":"Detail re-ask yields while anything is playing","pr":null,"conclusion":"failure","attempt":1,"jobs":{"Windows launcher syntax":19,"macOS tests against bundled FFmpeg and ASS":139,"Linux simulator build + launch":269},"failed":["macOS simulator build + launch"]}
 ],
 "nightly":[],
 "cancelled":{},
