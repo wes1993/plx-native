@@ -5842,14 +5842,12 @@ impl ScrobbleWork {
             // close it, not merely ask. `transcode_resource_reconciled` is the exact closer
             // (`/status/sessions/close`, 404 = already closed = success) and the ABR replacement
             // path already uses it through `ENCODER_CLEANUP`; this is the same call on the way out.
-            // It is idempotent, so it runs whenever the stop did not come back 2xx.
-            let closed = if stopped {
-                true
-            } else {
-                self.client
-                    .and_then(|c| c.transcode_resource_reconciled(&self.transcode_session))
-                    == Some(true)
-            };
+            // It runs even after a 2xx stop: that answers the physical encoder, not the resource,
+            // and a dashboard row outliving a stopped encoder is exactly what this closes.
+            let closed = self
+                .client
+                .and_then(|c| c.transcode_resource_reconciled(&self.transcode_session))
+                == Some(true);
             plx_base::eventlog::log(&format!(
                 "{}transcode stopped ok={} resource_closed={}",
                 if self.preview { "preview: " } else { "" },

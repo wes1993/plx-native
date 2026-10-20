@@ -2675,10 +2675,10 @@ fn the_stale_arms_of_the_drain_stop_their_encoder_off_the_frame_thread() {
 }
 
 /// Finding, device-measured on a share: a manual quality change registered a new encoder session
-/// and left the replaced one running — a bare `/stop` does not release it (M6: the stop worker
-/// can erase the physical entry first, and after an MDE the stop itself answers 404), so every
-/// change added a dashboard row and a share slot until nothing could play. Retiring a superseded
-/// encoder must stop it AND reconcile-close its resource.
+/// and left the replaced one running. Retiring it stopped the encoder but never closed its
+/// resource — and a 2xx stop answers the physical encoder, not the resource (M6), so every change
+/// still added a dashboard row and a share slot until nothing could play. Retiring a superseded
+/// encoder must stop it AND reconcile-close its resource, even when the stop succeeds.
 #[test]
 fn a_retired_superseded_encoder_is_stopped_and_its_resource_closed() {
     fn close_seen(log: &RequestLog, session: &str) -> bool {
@@ -2689,7 +2689,8 @@ fn a_retired_superseded_encoder_is_stopped_and_its_resource_closed() {
     }
     let mut ps = PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    // Stub PMS: the stop 404s (the M6 case — physically already gone), everything else 200s.
+    // Stub PMS: every leg answers 200 — including the stop, so the test proves the close is not
+    // skipped on a 2xx stop (the device case: stop_ok=1, row lingering without the close).
     assert!(plx_net::net::global_init() && crate::curlio::available());
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port() as i32;
@@ -2703,11 +2704,7 @@ fn a_retired_superseded_encoder_is_stopped_and_its_resource_closed() {
                 Ok((mut socket, _)) => {
                     let line = drain_http(&mut socket);
                     shared.lock().unwrap_or_else(|e| e.into_inner()).push(line.clone());
-                    if line.contains("/video/:/transcode/universal/stop") {
-                        write_status(&mut socket, 404);
-                    } else {
-                        write_status(&mut socket, 200);
-                    }
+                    write_status(&mut socket, 200);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     if stop_tx.try_recv().is_ok() {

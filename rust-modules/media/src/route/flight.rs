@@ -477,12 +477,13 @@ pub(super) fn stop_encoder_session(client: &'static plx_plex::plex::Client, sess
     );
 }
 
-/// Blocking stop + reconciled close of a dead encoder session, for workers that may block. A bare
-/// stop is NOT enough to release the session: PMS's stop worker can erase the physical map entry
-/// before it reconciles the Streaming Resource, and after an MDE the stop itself answers 404
-/// (`docs/pms-api.md` M6) — either way the resource outlives the encoder and keeps its dashboard
-/// row and its share slot. So a non-2xx stop is followed by the exact closer the exit path uses
-/// (`/status/sessions/close`, 404 = already closed = success). Idempotent, like that path.
+/// Blocking stop + reconciled close of a dead encoder session, for workers that may block.
+/// A bare stop is NOT enough to release the session, even when it answers 2xx: PMS's stop worker
+/// can erase the physical map entry before it reconciles the Streaming Resource, and after an MDE
+/// the stop itself answers 404 (`docs/pms-api.md` M6) — either way the resource can outlive the
+/// encoder and keep its dashboard row and its share slot. So the stop is ALWAYS followed by the
+/// exact closer the exit path uses (`/status/sessions/close`, 404 = already closed = success).
+/// Idempotent, like that path.
 pub(super) fn stop_encoder_session_sync(
     client: &plx_plex::plex::Client,
     session: &str,
@@ -491,11 +492,7 @@ pub(super) fn stop_encoder_session_sync(
         return (false, false);
     }
     let stopped = client.transcode_stop(session);
-    let closed = if stopped {
-        true
-    } else {
-        client.transcode_resource_reconciled(session) == Some(true)
-    };
+    let closed = client.transcode_resource_reconciled(session) == Some(true);
     (stopped, closed)
 }
 
