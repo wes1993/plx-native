@@ -90,7 +90,7 @@ const COMPACT_TITLE_FADE: f32 = 200.0;
 const K_SCROLL: f32 = plx_ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
 
-pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,reasked:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
+pub const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,version:u32,version_chosen:bool,reasked:bool,covered:bool,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;8],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 // The blocks packed end to end: each section starts where the one before it ends, so the chain
 // proves they are disjoint. The episodes come last, at 2^30, and end where the engine keys begin.
@@ -264,6 +264,12 @@ pub struct DetailScreen {
     /// server again), so it is hashed into [`SHAPE`]; cleared on `Enter` and whenever the item is
     /// present, so each visit and each new loss gets one shot, never a hot loop.
     reasked: bool,
+    /// Another screen is over this page (pushed player, presented panel or copy). While covered
+    /// the page must not re-ask for its item: the covering screen owns the slot (a playback, a
+    /// sibling resolve), and asking would supersede it. A LOGICAL decision for the same reason
+    /// as [`Self::reasked`], so it is hashed into [`SHAPE`]; set on `Cover`, cleared on
+    /// `Uncover` and `Enter`.
+    covered: bool,
     restore_intent: Option<RestoreIntent>,
     /// This page has already sent its addressed `ClearItem` to the Metadata store. §3.4's
     /// `pop_sequence` delivers `WillLeave(ForGood)` AND `Unmount` to the same body, and both land
@@ -584,6 +590,7 @@ impl DetailScreen {
             version_chosen: false,
             version_ask: None,
             reasked: false,
+            covered: false,
             restore_intent: None,
             teardown_cleared: false,
             withdrawn: false,
@@ -2038,8 +2045,10 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                 let refresh = self.refresh;
                 let request_status = meta.detail_request_status(self.sid, &self.rk);
                 // A new visibility epoch: the arm below decides this frame's own request, and a
-                // later `StoreChanged` may spend one recovery re-ask against it.
+                // later `StoreChanged` may spend one recovery re-ask against it. Visible again,
+                // so a cover that ended without an `Uncover` behind it cannot pin us quiet.
                 self.reasked = false;
+                self.covered = false;
                 // Deferred is newer than every request that could already occupy this address:
                 // it was armed only after the ViewState write completed. Always supersede that
                 // pre-write generation when the page becomes visible. Requested normally reuses
@@ -2305,6 +2314,17 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                 }
                 Handled::Yes
             }
+            // Covered (pushed player, presented panel or copy): the covering screen owns the
+            // Metadata slot while it is up, so this page must not re-ask for its item until it
+            // is visible again. Uncover/Enter clear it; teardown does not need to.
+            ScreenEvent::Cover => {
+                self.covered = true;
+                Handled::Yes
+            }
+            ScreenEvent::Uncover => {
+                self.covered = false;
+                Handled::Yes
+            }
             // Dismissed: the page under this surface has just been entered again, and it decided
             // what to ask for on the store as it stands. A request of this page's still in flight
             // would land on top of the item that page found loaded — and this page's teardown,
@@ -2398,7 +2418,8 @@ impl DetailScreen {
     /// Record a server obligation the sender has already backed (`Requested`) or that must wait
     /// for this page to own the Metadata slot again (`Deferred`). The one place the phase is set
     /// from outside, by `DetailReconcile`.
-    fn owe_refresh(&mut self, refresh: DetailRefreshPhase, meta: plx_data::metadata::MetadataView<'_>) {        match refresh {
+    fn owe_refresh(&mut self, refresh: DetailRefreshPhase, meta: plx_data::metadata::MetadataView<'_>) {
+        match refresh {
             DetailRefreshPhase::None => {}
             DetailRefreshPhase::Deferred => self.refresh = DetailRefreshPhase::Deferred,
             DetailRefreshPhase::Requested => {
@@ -2424,17 +2445,22 @@ impl DetailScreen {
     /// genuinely missing item costs two fetches per visit, never a hot loop (`StoreChanged`
     /// fires for every store note). The latch is spent only by firing, never by skipping, so a
     /// skipped check keeps its future chance. Skipped while a reconciliation is owed (`refresh`):
-    /// that obligation owns this address and retires on its own terminal. Skipped while the
-    /// playback descriptor names the loaded item: the slot belongs to that playback, and a page
-    /// that asked for itself again would land on top of it and overwrite the mailbox
-    /// (`content::library_publication_tests` guards exactly this for an item-menu Play off a
-    /// detail page). A stale descriptor from an earlier item — or none, after a teardown retired
-    /// it — is not ownership and must not block the recovery, which is why this compares against
-    /// the slot instead of merely asking whether anything was ever described. A movie names the
-    /// item by ratingKey, an episode by its show (the slot holds the episode leaf while the
-    /// descriptor points at the show); `NowPlaying` carries no server, so a cross-server
-    /// ratingKey collision can skip one shot — the latch survives the skip, and the next loss
-    /// asks again.
+    /// that obligation owns this address and retires on its own terminal. Skipped while covered
+    /// ([`Self::covered`]): the covering screen owns the slot — a playback, a sibling resolve —
+    /// and asking would supersede it. Skipped while a resolve is in flight
+    /// (`route::play_pending`, best-effort): the same window, before the player covers us.
+    /// Skipped while the playback descriptor names the loaded item: the slot belongs to that
+    /// playback, and a page that asked for itself again would land on top of it and overwrite
+    /// the mailbox (`content::library_publication_tests` guards exactly this for an item-menu
+    /// Play off a detail page, where the uncovered frame between the landing and the player push
+    /// is covered by neither of the two above). A stale descriptor from an earlier item — or
+    /// none, after a teardown retired it — is not ownership and must not block the recovery,
+    /// which is why this compares against the slot instead of merely asking whether anything
+    /// was ever described (a bare `is_some` never recovers in an ordinary session: every leaf
+    /// install describes itself). A movie names the item by ratingKey, an episode by its show
+    /// (the slot holds the episode leaf while the descriptor points at the show);
+    /// `NowPlaying` carries no server, so a cross-server ratingKey collision can skip one shot
+    /// — the latch survives the skip, and the next loss asks again.
     fn reask_detail<H: ContentLike>(
         &mut self,
         meta: plx_data::metadata::MetadataView<'_>,
@@ -2450,7 +2476,9 @@ impl DetailScreen {
             })
         });
         if self.reasked
+            || self.covered
             || self.refresh != DetailRefreshPhase::None
+            || plx_media::route::play_pending()
             || played_owns_slot
             || meta.detail_request_status(self.sid, &self.rk) == Some(true)
         {
@@ -3492,7 +3520,7 @@ impl LogicalState for DetailScreen {
             DetailRefreshPhase::Deferred => 1,
             DetailRefreshPhase::Requested => 2,
         });
-        w.u32(self.version as u32).bool(self.version_chosen).bool(self.reasked);
+        w.u32(self.version as u32).bool(self.version_chosen).bool(self.reasked).bool(self.covered);
         match &self.restore_intent {
             Some(intent) => {
                 w.bool(true)

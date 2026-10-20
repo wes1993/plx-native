@@ -2420,7 +2420,11 @@ pub const SCREEN_SHAPES: &[&str] = &[
 // recovery re-request for the current absence epoch — it changes whether a `StoreChanged` asks the
 // server again, so it is logical state. Same re-record rule; the previous pin was
 // 0x5c3f_17e5_43c9_02a0.
-const SCREEN_SHAPES_PIN: u64 = 0xa3cf_ace5_43a5_c29a;
+// Detail cover (`covered`): `screens::detail::SHAPE` gains whether another screen is over the page.
+// A covered page must not re-ask for its item (the covering screen owns the slot), so it changes
+// the same decision and is logical state for the same reason. Same re-record rule; the previous
+// pin was 0xa3cf_ace5_43a5_c29a.
+const SCREEN_SHAPES_PIN: u64 = 0x45e1_13c3_bf9a_93bf;
 
 #[cfg(test)]
 mod arg_tests {

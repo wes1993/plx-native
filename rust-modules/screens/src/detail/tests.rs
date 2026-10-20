@@ -137,6 +137,7 @@ pub(super) fn bare_held(sid: ServerId, rk: &str) -> DetailScreen {
         version_chosen: false,
         version_ask: None,
         reasked: false,
+        covered: false,
         restore_intent: None,
         teardown_cleared: false,
         withdrawn: false,
@@ -2765,6 +2766,35 @@ fn a_page_whose_slot_moved_under_it_reasks_once() {
     plx_data::metadata::set_current_for_test(test_store().state_mut(), Some(detail(sid, "b")));
     let _ = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 3), None);
     assert!(!screen.reasked, "a present item re-arms the latch");
+    clear();
+}
+
+/// **A covered page stays quiet.** While a player, panel or copy is over it the covering screen
+/// owns the slot — asking would supersede it — so no `StoreChanged` may spend the recovery shot.
+/// Uncovering re-arms it: the next loss asks again.
+#[test]
+fn a_covered_page_stays_quiet_and_uncovering_re_arms_it() {
+    fn asked_rks(effects: &[plx_machine::machine::Stamped<TestHost>]) -> Vec<String> {
+        effects.iter().filter_map(|effect| match &effect.fx {
+            Fx::App(AppFx::Store(StoreId::Metadata, StoreCmd::Metadata(MetadataCmd::RequestDetail { rk, .. }))) => Some(rk.clone()),
+            _ => None,
+        }).collect()
+    }
+    let sid = ServerId::UNSET;
+    // the copy's page stands on "b" while the slot holds "a"
+    let _guard = install(detail(sid, "a"));
+    let mut screen = bare(&_guard, sid, "b");
+    let _ = step(&mut screen, &ScreenEvent::Cover, None);
+    assert!(screen.covered);
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1), None);
+    assert!(asked_rks(&effects).is_empty(), "a covered page must not ask");
+    assert!(!screen.reasked, "a skip spends nothing");
+    // uncovered again, the same loss asks
+    let _ = step(&mut screen, &ScreenEvent::Uncover, None);
+    assert!(!screen.covered);
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2), None);
+    assert_eq!(asked_rks(&effects), vec!["b".to_string()]);
+    assert!(screen.reasked);
     clear();
 }
 
