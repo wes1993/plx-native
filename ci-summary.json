@@ -1,27 +1,6 @@
 {
- "generated": "2026-10-20T10:31:17Z",
+ "generated": "2026-10-20T10:32:01Z",
  "metrics": [
-  {
-   "change30_pct": null,
-   "change7_pct": null,
-   "d30": null,
-   "delta30": null,
-   "delta7": null,
-   "group": "ci",
-   "id": "push_wait",
-   "kind": "wait",
-   "label": "Wait after merge",
-   "n_now": 1,
-   "n_prev": 0,
-   "now": 278,
-   "prev7": null,
-   "shown": true,
-   "state": "new",
-   "state30": "new",
-   "threshold_abs": 60.0,
-   "threshold_pct": 15.0,
-   "unit": "s"
-  },
   {
    "change30_pct": null,
    "change7_pct": null,
