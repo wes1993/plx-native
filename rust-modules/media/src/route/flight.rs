@@ -467,9 +467,36 @@ pub(super) fn stop_encoder_session(client: &'static plx_plex::plex::Client, sess
         "retransc-stop",
         const { &plx_base::task::BlockingLabel::new("encoder stop (worker thread refused)") },
         move || {
-            let _ = client.transcode_stop(&session);
+            let (stopped, closed) = stop_encoder_session_sync(client, &session);
+            crate::player::log(&format!(
+                "encoder session retired stop_ok={} resource_closed={}",
+                stopped as i32,
+                closed as i32,
+            ));
         },
     );
+}
+
+/// Blocking stop + reconciled close of a dead encoder session, for workers that may block. A bare
+/// stop is NOT enough to release the session: PMS's stop worker can erase the physical map entry
+/// before it reconciles the Streaming Resource, and after an MDE the stop itself answers 404
+/// (`docs/pms-api.md` M6) — either way the resource outlives the encoder and keeps its dashboard
+/// row and its share slot. So a non-2xx stop is followed by the exact closer the exit path uses
+/// (`/status/sessions/close`, 404 = already closed = success). Idempotent, like that path.
+pub(super) fn stop_encoder_session_sync(
+    client: &plx_plex::plex::Client,
+    session: &str,
+) -> (bool, bool) {
+    if session.is_empty() {
+        return (false, false);
+    }
+    let stopped = client.transcode_stop(session);
+    let closed = if stopped {
+        true
+    } else {
+        client.transcode_resource_reconciled(session) == Some(true)
+    };
+    (stopped, closed)
 }
 
 /// A landing that will never install: stop what the worker started AND the encoder it replaced —
@@ -480,19 +507,20 @@ fn stop_discarded_landing(applied: AppliedRetranscode) {
     stop_encoder_session(applied.client, applied.superseded);
 }
 
-/// The encoder an ACCEPTED landing replaced, waiting for the reload that moves the Engine off it.
-/// Written by [`take_ready_retranscode_claim`] once the landing is installed; read by
-/// [`retire_superseded_encoder`] after the pump has run the claim's tail.
-static SUPERSEDED_ENCODER: std::sync::Mutex<Option<(&'static plx_plex::plex::Client, String)>> =
-    std::sync::Mutex::new(None);
+/// The encoders ACCEPTED landings replaced, waiting for the reloads that move the Engine off
+/// them. Written by [`take_ready_retranscode_claim`] once a landing is installed; read by
+/// [`retire_superseded_encoder`] after the pump has run the claim's tail. A LIST, not one slot:
+/// a second install before the first tail ran must not drop the first replaced encoder unstopped.
+static SUPERSEDED_ENCODER: std::sync::Mutex<Vec<(&'static plx_plex::plex::Client, String)>> =
+    std::sync::Mutex::new(Vec::new());
 
-/// Stop the encoder an accepted claim replaced. The pump calls this AFTER the claim's reload, not
+/// Stop the encoders accepted claims replaced. The pump calls this AFTER the claim's reload, not
 /// at the landing: until the reload the Engine (held at the claim offset) is still reading that
 /// stream, and stopping it early kills the picture the viewer is looking at. A no-op when no
 /// landing left one.
 pub fn retire_superseded_encoder() {
-    let pending = SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some((client, session)) = pending {
+    let pending = std::mem::take(&mut *SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()));
+    for (client, session) in pending {
         stop_encoder_session(client, session);
     }
 }
@@ -755,8 +783,7 @@ fn install_claim_landing(
                 advance_claim_snapshot(&mut action, |p| apply_retranscode_outcome_to_projection(p, &applied));
                 install_retranscode_outcome(ps, &applied);
                 if !applied.superseded.is_empty() {
-                    *SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()) =
-                        Some((applied.client, applied.superseded));
+                    SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()).push((applied.client, applied.superseded));
                 }
                 ClaimTail::Retranscode
             } else {
@@ -798,7 +825,7 @@ fn install_claim_landing(
                 Some(installed) => {
                     advance_claim_snapshot(&mut action, |p| installed.apply_to_projection(p));
                     if let Some(replaced) = installed.superseded() {
-                        *SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()) = Some(replaced);
+                        SUPERSEDED_ENCODER.lock().unwrap_or_else(|e| e.into_inner()).push(replaced);
                     }
                     ClaimTail::Retranscode
                 }

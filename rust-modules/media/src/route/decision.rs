@@ -9130,14 +9130,14 @@ pub(super) fn request_retranscode(
         contract,
     );
     let Some(decision) = inputs.client.transcode_decision(off, &sp) else {
-        let _ = inputs.client.transcode_stop(&qsess);
+        let _ = stop_encoder_session_sync(inputs.client, &qsess);
         return None;
     };
     // A live toggle the server refuses (or silently ignores — audio `copy` despite the params)
     // is a rejected action: the current stream is retained and the menu shows what plays.
     if enhancement_fallback(Some(&decision), audio) == Fallback::Retry {
         note_enhancement_refused("; current stream retained", audio);
-        let _ = inputs.client.transcode_stop(&qsess);
+        let _ = stop_encoder_session_sync(inputs.client, &qsess);
         return None;
     }
     if let Some(reason) = refusal(&decision) {
@@ -9149,7 +9149,7 @@ pub(super) fn request_retranscode(
                 ": server supplied a reason"
             },
         ));
-        let _ = inputs.client.transcode_stop(&qsess);
+        let _ = stop_encoder_session_sync(inputs.client, &qsess);
         return None;
     }
     let output_codecs = decision_codecs(&decision).unwrap_or((fallback_vcodec, fallback_acodec));

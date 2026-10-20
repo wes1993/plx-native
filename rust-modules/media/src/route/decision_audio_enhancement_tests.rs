@@ -2674,6 +2674,96 @@ fn the_stale_arms_of_the_drain_stop_their_encoder_off_the_frame_thread() {
     cleanup(&mut ps);
 }
 
+/// Finding, device-measured on a share: a manual quality change registered a new encoder session
+/// and left the replaced one running — a bare `/stop` does not release it (M6: the stop worker
+/// can erase the physical entry first, and after an MDE the stop itself answers 404), so every
+/// change added a dashboard row and a share slot until nothing could play. Retiring a superseded
+/// encoder must stop it AND reconcile-close its resource.
+#[test]
+fn a_retired_superseded_encoder_is_stopped_and_its_resource_closed() {
+    fn close_seen(log: &RequestLog, session: &str) -> bool {
+        log.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|r| r.contains("/status/sessions/close") && r.contains(session))
+    }
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    // Stub PMS: the stop 404s (the M6 case — physically already gone), everything else 200s.
+    assert!(plx_net::net::global_init() && crate::curlio::available());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port() as i32;
+    listener.set_nonblocking(true).unwrap();
+    let (done, stop_tx) = std::sync::mpsc::channel();
+    let log: RequestLog = Default::default();
+    let shared = log.clone();
+    let server = std::thread::spawn(move || {
+        loop {
+            match plx_base::testnet::accept(&listener) {
+                Ok((mut socket, _)) => {
+                    let line = drain_http(&mut socket);
+                    shared.lock().unwrap_or_else(|e| e.into_inner()).push(line.clone());
+                    if line.contains("/video/:/transcode/universal/stop") {
+                        write_status(&mut socket, 404);
+                    } else {
+                        write_status(&mut socket, 200);
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop_tx.try_recv().is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(e) => panic!("fixture accept: {e}"),
+            }
+        }
+    });
+    let sid = plx_plex::plex::register_for_test("retire-stub", "127.0.0.1", port, "token", "retire-client");
+    let client = plx_plex::plex::client_for(sid).expect("registered");
+    // An accepted user-retranscode landing that replaced "old-enc", installed the way the drain
+    // installs it (so the superseded session parks in the retire slot).
+    let ticket = worker_ticket();
+    PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner()).phase = ControlPhase::Applying(7);
+    post_claim_landing(RetranscodeClaimLanding {
+        owner: FlightOwner::Claim(ClaimedRouteAction {
+            serial: 7,
+            ticket: ticket.clone(),
+            intent: RouteIntent::User(UserRouteIntent::Retranscode),
+            displaced_pick: false,
+            claim_snapshot: None,
+        }),
+        pending_seek: -1,
+        user_target: 0,
+        result: RetranscodeClaimResult::Retranscode(AppliedRetranscode {
+            qsess: "new-enc".to_owned(),
+            url: String::new(),
+            vcodec: "hevc".into(),
+            acodec: "ac3".into(),
+            dovi: plx_data::metadata::Dovi::NONE,
+            dv_decision: plx_data::metadata::DvDecision::NONE,
+            contract: plx_plex::plex::EncodeContract::default(),
+            enhancement: EnhancementOutcome::Off,
+            ticket,
+            client,
+            superseded: "old-enc".into(),
+        }),
+    });
+    {
+        let _frame = plx_base::task::FrameScope::enter();
+        let (_, tail, ..) = take_ready_retranscode_claim(&mut ps).expect("the landing posted above");
+        assert_eq!(tail, ClaimTail::Retranscode);
+    }
+    // The pump reloads onto the new stream, THEN retires the one it replaced.
+    retire_superseded_encoder();
+    wait_until("the replaced encoder's stop", || stop_seen(&log, "old-enc"));
+    wait_until("the replaced encoder's resource close", || close_seen(&log, "old-enc"));
+    done.send(()).unwrap();
+    server.join().unwrap();
+    plx_plex::plex::reset_servers_for_test();
+    cleanup(&mut ps);
+}
+
 /// Finding: `transcode_seek`/`commit_user_seek` used to run for an unrelated claim's own seek
 /// branches while `ControlPhase::Applying` was held by a DIFFERENT in-flight claim — replacing the
 /// encoder or bumping `media_epoch` out from under the worker's own ticket, so the worker's
