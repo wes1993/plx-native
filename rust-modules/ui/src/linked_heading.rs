@@ -468,6 +468,7 @@ mod tests {
             press: PressRead::default(),
             focus,
             owner: OWNER,
+            nav_parked_page: false,
         }
     }
 

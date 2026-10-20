@@ -60,6 +60,7 @@ fn cx(focus: Option<FocusKey<u32>>) -> Cx<'static, CatHost> {
         press: PressRead::default(),
         focus: FocusRead { current: focus, ..Default::default() },
         owner: InputOwner::Entry(ENTRY),
+        nav_parked_page: false,
     }
 }
 

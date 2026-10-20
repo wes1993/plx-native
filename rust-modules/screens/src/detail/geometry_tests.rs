@@ -68,6 +68,7 @@ fn cx<'a>(measure: &'a dyn plx_machine::machine::Measure, elem: Option<u32>) -> 
             current: elem.map(|elem| FocusKey { entry: EntryId(8), elem }),
         ..Default::default() },
         owner: plx_machine::machine::InputOwner::Entry(EntryId(8)),
+        nav_parked_page: false,
     }
 }
 

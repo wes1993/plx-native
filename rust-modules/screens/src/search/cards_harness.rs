@@ -74,7 +74,7 @@ impl Harness {
     fn cx(&self) -> Cx<'_, SearchHost> {
         Cx { views: self.snap.view(), tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
             press: PressRead { scale: self.press, ..Default::default() },
-            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) }
+            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false }
     }
 
     fn step(&mut self, ev: ScreenEvent<SearchHost>) -> bool {
@@ -83,7 +83,7 @@ impl Harness {
         let (_, moving) = plx_machine::idle::scoped_motion(|| {
             let cx: Cx<'_, SearchHost> = Cx { views: self.snap.view(), tick: Tick { ms: self.ms, dt_us: 16_667 },
                 measure: &FixtureMeasure, press: PressRead { scale: self.press, ..Default::default() },
-                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) };
+                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
             let mut fx = Effects::new(&mut out, MachineId::Instance(INSTANCE), &mut present);
             Machine::<SearchHost>::step(&mut self.screen, &ev, &cx, &mut fx);
         });

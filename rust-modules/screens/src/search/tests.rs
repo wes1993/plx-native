@@ -88,7 +88,7 @@ impl Fixture {
     fn cx(&self, focus: Option<FocusKey<u32>>) -> Cx<'_, HostFixture> {
         Cx { views: self.search.view(), tick: Tick::default(), measure: &self.measure,
             focus: FocusRead { current: focus, ..Default::default() },
-            press: PressRead::default(), owner: OWNER }
+            press: PressRead::default(), owner: OWNER, nav_parked_page: false }
     }
     /// A mounted screen, its content fade already run out so a settled-motion assertion is about
     /// the springs rather than about the page arriving.

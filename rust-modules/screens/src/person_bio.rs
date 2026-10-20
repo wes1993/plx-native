@@ -817,6 +817,7 @@ mod tests {
             press: PressRead::default(),
             focus: FocusRead::default(),
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         }
     }
 

@@ -86,6 +86,7 @@ impl Publication {
             focus: engine.read(OWNER),
             press: Default::default(),
             owner: OWNER,
+            nav_parked_page: false,
         }
     }
     // Route the screen's queued Enter/Remember effects through the actual engine. No test cursor.

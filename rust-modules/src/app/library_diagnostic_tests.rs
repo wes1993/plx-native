@@ -152,6 +152,7 @@ fn library_switch_menu_steps_drive_the_input_owning_menu_and_genre_return() {
             press: Default::default(),
             focus: plx_machine::machine::FocusRead { current: d.focus(), ..Default::default() },
             owner: InputOwner::Entry(menu_entry),
+            nav_parked_page: false,
         };
         let split = rig.split();
         let cx = parts.cx::<AppHost>(split.views, split.measure);

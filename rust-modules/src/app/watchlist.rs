@@ -329,7 +329,7 @@ impl Bridge {
             let screen = &d.nav.entry(entry).filter(|e| e.arg == AppArg::Watchlist)?.inst.as_ref()?.screen;
             let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
                 focus: plx_machine::machine::FocusRead { current: Some(key), ..Default::default() },
-                owner: InputOwner::Entry(entry) };
+                owner: InputOwner::Entry(entry), nav_parked_page: false };
             let cx = parts.cx::<AppHost>(self.views(), &self.measure);
             screen.focused_card_rect(&cx, Some(key), At::Drawn)
         });

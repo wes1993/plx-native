@@ -916,6 +916,7 @@ mod tests {
                 current: focus.map(|elem| FocusKey { entry: EntryId(0), elem }),
             ..Default::default() },
             owner: InputOwner::Entry(EntryId(0)),
+            nav_parked_page: false,
         }
     }
 

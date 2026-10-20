@@ -102,7 +102,7 @@ impl Harness {
         Cx { views: Views { listing: self.listing.view(), directory: self.directory.view(), hubs: self.hubs.view() },
             tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
-            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) }
+            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false }
     }
 
     fn sync(&mut self) {
@@ -110,7 +110,7 @@ impl Harness {
             views: Views { listing: self.listing.view(), directory: self.directory.view(), hubs: self.hubs.view() },
             tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
-            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) };
+            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
         self.screen.sync(&cx);
     }
 
@@ -122,7 +122,7 @@ impl Harness {
                 views: Views { listing: self.listing.view(), directory: self.directory.view(), hubs: self.hubs.view() },
                 tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
                 press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
-                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) };
+                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
             let mut fx = Effects::new(&mut out, MachineId::Instance(INSTANCE), &mut present);
             Machine::<LibHost>::step(&mut self.screen, &ev, &cx, &mut fx);
         });
@@ -394,7 +394,7 @@ mod pop_tests {
                 views: Views { listing: h.listing.view(), directory: h.directory.view(), hubs: h.hubs.view() },
                 tick: Tick { ms: h.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
                 press: PressRead { scale: h.press, owner: h.focus, ..Default::default() },
-                focus: FocusRead { current: h.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) };
+                focus: FocusRead { current: h.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
             let _discovery = plx_ui::frame::backdrop::discover(std::rc::Rc::new(std::cell::RefCell::new(Default::default())));
             let mut frame = plx_ui::screen::DrawFrame::new(&cx, plx_ui::Painter::root());
             Part::<LibHost>::draw(&mut h.screen.pair.detail, &mut frame, Rect::FULL);

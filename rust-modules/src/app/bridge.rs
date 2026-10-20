@@ -703,7 +703,7 @@ impl Bridge {
         let e = d.nav.entry(entry).filter(|e| e.arg == AppArg::Search)?;
         let screen = &e.inst.as_ref()?.screen;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry) };
+            focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         let card = screen.focused_card(&cx, focus, Some(At::Drawn))?;
         let item = card.item.downcast_ref::<plx_data::search::Item>()?.clone();
@@ -723,7 +723,7 @@ impl Bridge {
         let e = d.nav.entry(entry).filter(|e| e.arg == AppArg::Library)?;
         let screen = &e.inst.as_ref()?.screen;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry) };
+            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         let card = screen.focused_card(&cx, focus, Some(At::Drawn))?;
         let item = card.item.downcast_ref::<plx_data::pms::PmsMovie>()?.clone();
@@ -827,7 +827,7 @@ impl Bridge {
         let rect = focus.filter(|key| key.entry == entry).and_then(|key| {
             let screen = &d.nav.entry(entry).filter(|e| e.arg == AppArg::Home)?.inst.as_ref()?.screen;
             let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-                focus: plx_machine::machine::FocusRead { current: Some(key) , ..Default::default() }, owner: InputOwner::Entry(entry) };
+                focus: plx_machine::machine::FocusRead { current: Some(key) , ..Default::default() }, owner: InputOwner::Entry(entry), nav_parked_page: false };
             let cx = parts.cx::<AppHost>(self.views(), &self.measure);
             screen.focused_card_rect(&cx, Some(key), At::Drawn)
         });
@@ -862,7 +862,7 @@ impl Bridge {
         let home = entry.inst.as_ref()?.screen.as_any()?.downcast_ref::<plx_screens::home::HomeScreen>()?;
         let focus = Self::home_focus(d);
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
+            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry.id), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         Some(f(home, &cx, focus))
     }
@@ -875,7 +875,7 @@ impl Bridge {
             .and_then(|s| s.downcast_ref::<plx_screens::collection::CollectionScreen>()) else { return false };
         let focus = d.input.engine.current(InputOwner::Entry(entry.id));
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry.id) };
+            focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry.id), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         page.focused_item::<AppHost>(focus, &cx).is_some()
     }
@@ -1023,7 +1023,7 @@ impl Bridge {
             .and_then(|s| s.downcast_ref::<plx_screens::home::HomeScreen>()) else { return false };
         if <plx_screens::home::HomeScreen as Screen<AppHost>>::strip_reachable(home) { return false; }
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: Self::home_focus(d) , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
+            focus: plx_machine::machine::FocusRead { current: Self::home_focus(d) , ..Default::default() }, owner: InputOwner::Entry(entry.id), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         if home.grid_position::<AppHost>(parts.focus.current, &cx).is_none() { return false; }
         self.home_command(HomeCmd::ItemMenu)
@@ -1042,7 +1042,7 @@ impl Bridge {
         let mut parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
             press: plx_machine::machine::PressRead { scale: 1.0, is_long: false, held_ms: None, owner: None },
             focus: plx_machine::machine::FocusRead { current: None , ..Default::default() },
-            owner: plx_machine::machine::InputOwner::Entry(entry) };
+            owner: plx_machine::machine::InputOwner::Entry(entry), nav_parked_page: false };
         parts.owner = plx_machine::machine::InputOwner::Entry(entry);
         parts.focus.current = ret.focus;
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
@@ -2424,7 +2424,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
             .and_then(|s| s.downcast_ref::<plx_screens::home::HomeScreen>()) else { return String::new() };
         let focus = Bridge::home_focus(d);
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
+            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
         let position = home.grid_position::<AppHost>(focus, &cx);
         let (row, col) = position.map(|(r, c)| (r as i64, c as i64)).unwrap_or((-1, -1));
@@ -2455,7 +2455,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
             .and_then(|s| s.downcast_ref::<plx_screens::library::LibraryScreen>()) else { return String::new() };
         let focus = d.input.engine.current(InputOwner::Entry(page.id));
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
+            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
         let menu = d.top_surface_name() == Some("library_menu");
         let pill = if menu { -1 } else { match rig.chrome.focus(focus) {
@@ -2493,7 +2493,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
     let focus = d.focus();
     let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
         press: plx_machine::machine::PressRead { scale: 1.0, is_long: false, held_ms: None, owner: None },
-        focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(owner) };
+        focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(owner), nav_parked_page: false };
     let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
     let mut groups = Vec::new();
     instance.screen.groups(&cx, &mut groups);
@@ -2856,6 +2856,7 @@ pub(crate) fn opener_parts(
         press: opener_press(d),
         focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() },
         owner: plx_machine::machine::InputOwner::Entry(entry),
+        nav_parked_page: false,
     }
 }
 

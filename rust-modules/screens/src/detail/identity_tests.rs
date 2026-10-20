@@ -187,7 +187,7 @@ fn first(d: &Dispatcher<TestHost>, group: GroupId) -> FocusKey<u32> {
     let s = screen(d);
     let measure = FixtureMeasure;
     let cx = Cx::<TestHost> { views: (), tick: tick(16), measure: &measure,
-        press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(s.entry) };
+        press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(s.entry), nav_parked_page: false };
     let r = Rect::new(0.0, 0.0, 1.0, 1.0);
     Focusable::<TestHost>::seat(s, group, Placed { rect: r, rest_rect: r, clip: Rect::FULL, index: Some(0) }, &cx)
 }
@@ -428,7 +428,7 @@ fn stray_runs(detail: Detail, server_values: &[&str]) -> Vec<String> {
         let inst = entry.inst.as_mut().expect("mounted detail");
         let measure = FixtureMeasure;
         let cx = Cx::<TestHost> { views: (), tick: tick(32), measure: &measure,
-            press: Default::default(), focus: Default::default(), owner };
+            press: Default::default(), focus: Default::default(), owner, nav_parked_page: false };
         let mut f = DrawFrame::new(&cx, plx_ui::Painter::recording());
         plx_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
     });
@@ -497,7 +497,7 @@ fn census(detail: Detail) -> std::collections::BTreeMap<(u64, bool), usize> {
         let inst = entry.inst.as_mut().expect("mounted detail");
         let measure = FixtureMeasure;
         let cx = Cx::<TestHost> { views: (), tick: tick(32), measure: &measure,
-            press: Default::default(), focus: Default::default(), owner };
+            press: Default::default(), focus: Default::default(), owner, nav_parked_page: false };
         let mut f = DrawFrame::new(&cx, plx_ui::Painter::recording());
         plx_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
     });
@@ -914,7 +914,7 @@ fn a_press_never_crosses_the_cards_between_the_head_and_a_window_that_slid_away(
     let step = |d: &Dispatcher<TestHost>, from: FocusKey<u32>, dir: Dir| {
         let measure = FixtureMeasure;
         let cx = Cx::<TestHost> { views: (), tick: tick(16), measure: &measure,
-            press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(from.entry) };
+            press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(from.entry), nav_parked_page: false };
         Focusable::<TestHost>::neighbour(screen(d), from, dir, &cx)
     };
     let (head_last, window_first) = (key_at(&d, 2), key_at(&d, 3));

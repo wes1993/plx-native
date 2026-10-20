@@ -1463,6 +1463,7 @@ mod tests {
             press: PressRead::default(),
             focus: FocusRead::default(),
             owner: InputOwner::Entry(EntryId(0)),
+            nav_parked_page: false,
         }
     }
 
@@ -2163,6 +2164,7 @@ mod tests {
                 current: Some(focus_of(&s, &store, 0, 0)),
             ..Default::default() },
             owner: InputOwner::Entry(EntryId(0)),
+            nav_parked_page: false,
         };
         {
             let mut fx = Effects::new(
@@ -2864,6 +2866,7 @@ mod tests {
                 press: PressRead::default(),
                 focus: FocusRead { current: focus , ..Default::default() },
                 owner: InputOwner::Entry(screen.page.entry),
+                nav_parked_page: false,
             };
             let mut fx = Effects::new(
                 &mut out,

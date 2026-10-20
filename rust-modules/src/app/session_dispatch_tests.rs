@@ -500,7 +500,7 @@ fn session_frame_read_borrows_the_bridge_publication() {
     let mut rig = Bridge::for_test(|| 0);
     let retained = rig.session.publication();
     let parts = CxParts { tick: Tick::default(), press: Default::default(),
-        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
+        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let split = rig.split();
     let cx = parts.cx::<AppHost>(split.views, split.measure);
     assert!(std::ptr::eq(AppHost::auth(&cx).0, &*retained));
@@ -525,7 +525,7 @@ fn endpoint_outcomes_cross_central_dispatch_machine_bridge_and_boot() {
             assert_eq!(rig.stores.take_notices(), [(StoreId::Hubs, generation + 1)]);
         }
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
+            focus: Default::default(), owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
         let mut present = plx_machine::present::Present::default();
         let mut out = Vec::new();
         let mut fx = Effects::new(&mut out, MachineId::Store(StoreId::Hubs.ord()), &mut present);

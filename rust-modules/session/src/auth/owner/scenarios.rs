@@ -27,7 +27,7 @@ pub fn step(owner: &mut SessionMachine, event: SessionEvent) -> Vec<SessionFx> {
     let publication = owner.publication();
     let cx = Cx::<OwnerHost> { views: publication.read(), tick: Tick::default(),
         measure: &plx_machine::machine::BareMeasure, press: Default::default(),
-        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
+        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut present = plx_machine::present::Present::new();
     let mut effects = Vec::new();
     owner.step(&event, &cx, &mut Effects::new(&mut effects, MachineId::Session, &mut present));

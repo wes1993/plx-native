@@ -41,6 +41,7 @@ pub fn cx_with<'a>(
         press: PressRead::default(),
         focus: FocusRead { current: focus , ..Default::default() },
         owner: InputOwner::Entry(EntryId(0)),
+        nav_parked_page: false,
     }
 }
 

@@ -1897,6 +1897,7 @@ mod tests {
             focus: FocusRead { current: focus, ..Default::default() },
             press: PressRead::default(),
             owner: InputOwner::Entry(EntryId(9)),
+            nav_parked_page: false,
         }
     }
     fn panel(entry: EntryId) -> TracksPanelScreen {

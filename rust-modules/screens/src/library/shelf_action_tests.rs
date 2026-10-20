@@ -83,6 +83,7 @@ fn shelf_activate_and_hold_keep_the_deck_promise_and_engine_item_identity() {
             owner: None,
         },
         owner,
+        nav_parked_page: false,
     };
     let mut page = LibraryScreen::new(entry, InstanceId(20), SecKind::Movie);
     page.sync(&cx(&engine));
@@ -198,6 +199,7 @@ fn a_collection_shelf_heading_is_a_linked_focus_stop_that_opens_the_collection()
         focus: engine.read(owner),
         press: PressRead::default(),
         owner,
+        nav_parked_page: false,
     };
     let mut page = LibraryScreen::new(entry, InstanceId(21), SecKind::Movie);
     page.sync(&cx(&engine));

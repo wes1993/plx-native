@@ -1552,6 +1552,7 @@ impl HomeScreen {
                 current: visible_focus,
             ..Default::default() },
             owner: cx.owner,
+            nav_parked_page: cx.nav_parked_page,
         };
         self.update_grid(view, &visible_cx, fx, t);
 

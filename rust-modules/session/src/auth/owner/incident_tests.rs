@@ -33,6 +33,7 @@ fn step(owner: &mut SessionMachine, event: SessionEvent) -> Vec<SessionFx> {
         press: Default::default(),
         focus: Default::default(),
         owner: InputOwner::Entry(EntryId(0)),
+        nav_parked_page: false,
     };
     let mut present = plx_machine::present::Present::new();
     let mut effects = Vec::new();

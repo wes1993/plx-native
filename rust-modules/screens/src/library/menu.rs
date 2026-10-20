@@ -857,6 +857,7 @@ mod tests {
             focus: FocusRead { current: None , ..Default::default() },
             press: PressRead::default(),
             owner: InputOwner::Entry(EntryId(7)),
+            nav_parked_page: false,
         })
     }
 

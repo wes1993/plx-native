@@ -107,6 +107,7 @@ impl Fixture {
             focus: FocusRead { current: focus, ..Default::default() },
             press: PressRead::default(),
             owner: OWNER,
+            nav_parked_page: false,
         }
     }
 

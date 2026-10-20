@@ -5026,7 +5026,7 @@ mod tests {
             let publication = owner.publication();
             let cx = Cx::<OwnerHost> { views: publication.read(), tick: Tick::default(),
                 measure: &plx_machine::machine::BareMeasure, press: Default::default(),
-                focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
+                focus: Default::default(), owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
             let mut present = plx_machine::present::Present::new();
             let _ = present.take(0); // the spinner's last frame has been presented
             assert!(!present.peek(0), "rig: nothing is owed before the result lands");

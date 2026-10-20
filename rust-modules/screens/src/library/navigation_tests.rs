@@ -133,6 +133,7 @@ impl Fixture {
             focus: engine.read(OWNER),
             press: Default::default(),
             owner: OWNER,
+            nav_parked_page: false,
         }
     }
     fn screen(&self) -> LibraryScreen {

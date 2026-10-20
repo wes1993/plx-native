@@ -117,6 +117,7 @@ impl Fixture {
             },
             press: PressRead::default(),
             owner: OWNER,
+            nav_parked_page: false,
         }
     }
     fn screen(&self) -> LibraryScreen {

@@ -357,6 +357,13 @@ pub struct Cx<'a, H: Host> {
     pub press: PressRead<H::Elem>,
     pub focus: FocusRead<H::Elem>,
     pub owner: InputOwner,
+    /// A page-moving navigation is parked for this frame's commit (`Dispatcher::
+    /// has_pending_navigation`). Steps before the commit see it; steps after see the committed
+    /// tree. A screen deciding whether the Metadata slot is "its to ask for" reads this rather
+    /// than guessing from store state no screen can separate (a play-owned slot and a refetched
+    /// page read identically there): a parked page move always ends in fresh `Enter`s, which run
+    /// their own request logic.
+    pub nav_parked_page: bool,
 }
 
 /// The dispatcher's reborrow of `App.present` for one step (§3.1, §4.4): `note` is its one method.

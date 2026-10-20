@@ -96,6 +96,7 @@ impl Harness {
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
             focus: FocusRead { current: self.focus, ..Default::default() },
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         }
     }
 
@@ -118,6 +119,7 @@ impl Harness {
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
             focus: FocusRead { current: self.focus, ..Default::default() },
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         };
         {
             let _discovery = plx_ui::frame::backdrop::discover(sources.clone());
@@ -137,6 +139,7 @@ impl Harness {
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
             focus: FocusRead { current: self.focus, ..Default::default() },
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         };
         let screen = &mut self.screen;
         plx_ui::draw_census::capture_text(|| {
@@ -158,6 +161,7 @@ impl Harness {
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
             focus: FocusRead { current: self.focus, ..Default::default() },
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         };
         let screen = &mut self.screen;
         plx_ui::draw_census::capture(|| {
@@ -191,6 +195,7 @@ impl Harness {
                 press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
                 focus: FocusRead { current: self.focus, ..Default::default() },
                 owner: InputOwner::Entry(ENTRY),
+                nav_parked_page: false,
             };
             let mut fx = Effects::new(
                 &mut out,

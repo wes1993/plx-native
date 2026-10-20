@@ -395,6 +395,7 @@ fn the_menu_surface_begins_and_ends_as_the_pages_pill_and_is_never_nothing() {
             press: PressRead::default(),
             focus: FocusRead::default(),
             owner: InputOwner::Entry(entry),
+            nav_parked_page: false,
         };
         let mut fx = Effects::new(&mut out, plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(10)), &mut present);
         Machine::<WatchHost>::step(menu, &ev, &cx, &mut fx);
@@ -408,6 +409,7 @@ fn the_menu_surface_begins_and_ends_as_the_pages_pill_and_is_never_nothing() {
             press: PressRead::default(),
             focus: FocusRead { current: Some(FocusKey { entry, elem: 0 }), ..Default::default() },
             owner: InputOwner::Entry(entry),
+            nav_parked_page: false,
         };
         plx_ui::draw_census::capture(|| {
             let _discovery = plx_ui::frame::backdrop::discover(sources.clone());

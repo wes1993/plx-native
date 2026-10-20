@@ -1743,6 +1743,7 @@ mod step_ladder_tests {
             focus: Default::default(),
             press: Default::default(),
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         }
     }
 
@@ -2278,6 +2279,7 @@ mod scrub_ownership_tests {
             focus: Default::default(),
             press: Default::default(),
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         }
     }
 
@@ -3392,7 +3394,7 @@ mod repair_confirmation_tests {
     }
     fn context(ps: &plx_media::route::PlaybackSession, elem: Option<u32>) -> Cx<'_, TestHost> {
         let mut cx = Cx { views: ps, tick: Tick::default(), measure: &plx_ui::fixture::FixtureMeasure,
-            focus: Default::default(), press: Default::default(), owner: InputOwner::Entry(EntryId(1)) };
+            focus: Default::default(), press: Default::default(), owner: InputOwner::Entry(EntryId(1)), nav_parked_page: false };
         cx.focus.current = elem.map(|elem| FocusKey { entry: EntryId(1), elem });
         cx
     }

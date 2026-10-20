@@ -11,7 +11,7 @@ pub fn context(focus: u32) -> Cx<'static, InnerHost> {
     Cx { views: plx_data::stores::browse::DirectoryView::empty_for_test(), tick: Tick::default(),
         measure: &MEASURE, press: PressRead::default(),
         focus: FocusRead { current: Some(FocusKey { entry: EntryId(0), elem: focus }), ..Default::default() },
-        owner: InputOwner::Entry(EntryId(0)) }
+        owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false }
 }
 /// Step `page` with `ev` and return what it emitted.
 pub fn drive<M: Machine<InnerHost, Ev = ScreenEvent<InnerHost>>>(page: &mut M, ev: ScreenEvent<InnerHost>, focus: u32) -> Vec<Stamped<InnerHost>> {

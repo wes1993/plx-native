@@ -132,7 +132,7 @@ fn a_detail_related_card_opens_its_menu_at_the_drawn_rect_and_other_shelves_open
         let screen = &d.nav.entry(entry).unwrap().inst.as_ref().unwrap().screen;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
             focus: plx_machine::machine::FocusRead { current: Some(FocusKey { entry, elem }), ..Default::default() },
-            owner: InputOwner::Entry(entry) };
+            owner: InputOwner::Entry(entry), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
         let page = screen.as_any().unwrap().downcast_ref::<plx_screens::detail::DetailScreen>().unwrap();
         Focusable::<AppHost>::place(page, &elem, &cx, At::Drawn).expect("a Related card is placed")

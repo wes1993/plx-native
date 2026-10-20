@@ -1085,7 +1085,7 @@ mod tests {
     pub(super) fn cx<'a>(view: plx_data::collection::CollectionView<'a>, focus: Option<plx_machine::machine::FocusKey<u32>>) -> Cx<'a, CollectionHost> {
         Cx { views: view, tick: Tick::default(), measure: &FixtureMeasure,
             press: PressRead::default(), focus: FocusRead { current: focus, ..Default::default() },
-            owner: InputOwner::Entry(EntryId(9)) }
+            owner: InputOwner::Entry(EntryId(9)), nav_parked_page: false }
     }
 
     #[test]

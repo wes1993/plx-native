@@ -2104,7 +2104,7 @@ impl<H: ContentLike + crate::registry::MetadataLike> Machine<H> for DetailScreen
                     }
                     // The slot may have moved under this page while it was covered — ask again
                     // (once per epoch) rather than sitting on "Caricamento…" forever.
-                    self.reask_detail(meta, fx);
+                    self.reask_detail(cx.nav_parked_page, meta, fx);
                 }
                 self.pump_restore(meta, fx);
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
@@ -2447,22 +2447,18 @@ impl DetailScreen {
     /// skipped check keeps its future chance. Skipped while a reconciliation is owed (`refresh`):
     /// that obligation owns this address and retires on its own terminal. Skipped while covered
     /// ([`Self::covered`]): the covering screen owns the slot — a playback, a sibling resolve —
-    /// and asking would supersede it. Skipped while a resolve is in flight
-    /// (`route::play_pending`, best-effort): the same window, before the player covers us.
-    /// Skipped while the playback descriptor names the loaded item: the slot belongs to that
-    /// playback, and a page that asked for itself again would land on top of it and overwrite
-    /// the mailbox (`content::library_publication_tests` guards exactly this for an item-menu
-    /// Play off a detail page, where the uncovered frame between the landing and the player push
-    /// is covered by neither of the two above). A stale descriptor from an earlier item — or
-    /// none, after a teardown retired it — is not ownership and must not block the recovery,
-    /// which is why this compares against the slot instead of merely asking whether anything
-    /// was ever described (a bare `is_some` never recovers in an ordinary session: every leaf
-    /// install describes itself). A movie names the item by ratingKey, an episode by its show
-    /// (the slot holds the episode leaf while the descriptor points at the show);
-    /// `NowPlaying` carries no server, so a cross-server ratingKey collision can skip one shot
-    /// — the latch survives the skip, and the next loss asks again.
+    /// and asking would supersede it. Skipped while a page navigation is parked (`nav_parked`):
+    /// the commit always ends in fresh `Enter`s, which run their own request logic — this is what
+    /// keeps an item-menu Play's landing frame quiet, where the uncovered gap between the install
+    /// and the player push reads exactly like a lost slot in every store signal no screen can
+    /// separate (`content::library_publication_tests` guards it). Skipped while a resolve is in
+    /// flight (`route::play_pending`, best-effort): the same window, before the player covers us.
+    /// A stale playback descriptor from an earlier item — or none, after a teardown retired it —
+    /// is not ownership and never blocks: store state alone cannot tell a play-owned slot from a
+    /// refetched page, so this does not ask it.
     fn reask_detail<H: ContentLike>(
         &mut self,
+        nav_parked: bool,
         meta: plx_data::metadata::MetadataView<'_>,
         fx: &mut Effects<'_, H>,
     ) {
@@ -2470,16 +2466,11 @@ impl DetailScreen {
             self.reasked = false;
             return;
         }
-        let played_owns_slot = meta.now_playing().is_some_and(|n| {
-            meta.current().is_some_and(|d| {
-                n.detail_rk == d.rk || (d.kind == "episode" && n.detail_rk == d.show_rk)
-            })
-        });
         if self.reasked
             || self.covered
+            || nav_parked
             || self.refresh != DetailRefreshPhase::None
             || plx_media::route::play_pending()
-            || played_owns_slot
             || meta.detail_request_status(self.sid, &self.rk) == Some(true)
         {
             return;

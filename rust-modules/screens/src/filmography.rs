@@ -1204,6 +1204,7 @@ mod tests {
             press: PressRead::default(),
             focus: FocusRead { current: focus , ..Default::default() },
             owner: InputOwner::Entry(focus.map_or(EntryId(0), |k| k.entry)),
+            nav_parked_page: false,
         }
     }
 

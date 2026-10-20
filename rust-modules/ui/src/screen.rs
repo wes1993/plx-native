@@ -1044,6 +1044,7 @@ mod draw_frame_tests {
             press: PressRead::default(),
             focus: FocusRead::default(),
             owner: InputOwner::Entry(EntryId(0)),
+            nav_parked_page: false,
         }
     }
 
@@ -1256,7 +1257,8 @@ mod composed_owner_tests {
     fn repaired(pair: &Pair, elem: u32) -> u32 {
         let (measure, store) = (FixtureMeasure, FixtureView::default());
         let cx = Cx { views: FixtureViews { store: &store }, tick: Tick::default(), measure: &measure,
-            press: PressRead::default(), focus: FocusRead::default(), owner: InputOwner::Entry(EntryId(1)) };
+            press: PressRead::default(), focus: FocusRead::default(), owner: InputOwner::Entry(EntryId(1)),
+            nav_parked_page: false };
         composed_reconcile(pair, FocusKey { entry: EntryId(1), elem }, &cx).elem
     }
     fn pair(owned: Vec<u32>, placed: Vec<u32>, repair: u32) -> Pair {

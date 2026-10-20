@@ -108,7 +108,7 @@ fn person_item(sid: plx_plex::plex::ServerId, rk: &str, watched: bool) -> plx_da
 
 fn deliver_person(rig: &mut Bridge, command: plx_data::stores::person::PersonCmd) {
     let parts = CxParts { tick: Tick::default(), press: Default::default(),
-        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
+        focus: Default::default(), owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut out = Vec::new();
     let mut present = plx_machine::present::Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Store(StoreId::Person.ord()), &mut present);
@@ -374,7 +374,7 @@ fn hubs_land_and_tick_keep_the_frame_directory_policy() {
         let _ = rig.stores.hubs.run_with_directory(
             plx_data::stores::hubs::HubsCmd::Reset, directory.view());
         let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
-            owner: InputOwner::Entry(EntryId(0)) };
+            owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
         let mut present = Present::new();
         let mut effects = Vec::new();
         let mut fx = Effects::new(&mut effects, MachineId::Store(StoreId::Hubs.ord()), &mut present);
@@ -449,7 +449,7 @@ fn search_capture_and_pump_keep_the_frame_directory_policy() {
     let query_generation = rig.stores.search.query_gen();
     let _ = rig.stores.take_notices();
     let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
-        owner: InputOwner::Entry(EntryId(0)) };
+        owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut present = Present::new();
     let mut effects = Vec::new();
     let mut fx = Effects::new(&mut effects, MachineId::Store(StoreId::Search.ord()), &mut present);

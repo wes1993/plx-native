@@ -153,6 +153,7 @@ impl Rig {
             press: PressRead { scale: 1.0, owner: self.focus, ..Default::default() },
             focus: FocusRead { current: self.focus, ..Default::default() },
             owner: InputOwner::Entry(ENTRY),
+            nav_parked_page: false,
         };
         let mut fx = Effects::new(&mut out, MachineId::Instance(InstanceId(9)), &mut present);
         self.shelf.on(&ev, &cx, &self.src, &mut fx);

@@ -61,7 +61,7 @@ impl Harness {
         self.store.install_credits_for_test(&[("Actor", 9)]);
         self.store.install_profile_for_test();
         let cx: Cx<'_, PersonHost> = Cx { views: self.store.view(), tick: Tick::default(), measure: &FixtureMeasure,
-            press: PressRead::default(), focus: FocusRead::default(), owner: InputOwner::Entry(ENTRY) };
+            press: PressRead::default(), focus: FocusRead::default(), owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
         self.screen.page.refresh_store_cache(&cx);
         // the stack lays its sections out on the first event it sees after the content moved
         self.step(ScreenEvent::Cover);
@@ -70,7 +70,7 @@ impl Harness {
     fn cx(&self) -> Cx<'_, PersonHost> {
         Cx { views: self.store.view(), tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
             press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
-            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) }
+            focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false }
     }
 
     fn step(&mut self, ev: ScreenEvent<PersonHost>) -> bool {
@@ -79,7 +79,7 @@ impl Harness {
         let (_, moving) = plx_machine::idle::scoped_motion(|| {
             let cx = Cx { views: self.store.view(), tick: Tick { ms: self.ms, dt_us: 16_667 }, measure: &FixtureMeasure,
                 press: PressRead { scale: self.press, owner: self.focus, ..Default::default() },
-                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY) };
+                focus: FocusRead { current: self.focus, ..Default::default() }, owner: InputOwner::Entry(ENTRY), nav_parked_page: false };
             let mut fx = Effects::new(&mut out,
                 plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(0)), &mut present);
             Machine::<PersonHost>::step(&mut self.screen, &ev, &cx, &mut fx);

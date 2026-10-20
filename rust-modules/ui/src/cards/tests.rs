@@ -40,6 +40,7 @@ fn cx9_pressed(view: &FixtureView, ms: u32, press: f32, focus: Option<FocusKey<u
         press: PressRead { scale: press, owner: pressed, ..Default::default() },
         focus: FocusRead { current: focus, ..Default::default() },
         owner: InputOwner::Entry(ENTRY),
+        nav_parked_page: false,
     }
 }
 

@@ -90,7 +90,7 @@ fn home_requests_keep_the_emitting_instance_and_captured_return_memory() {
     let requests = vec![HomeReq::Play { sid, rk: "1".into(), resume_ns: 1_000_000 },
         HomeReq::Detail { sid, rk: "1".into() }, HomeReq::ItemMenu { sid, rk: "1".into() }, HomeReq::Account,
         HomeReq::Tab(HomeTab::Home), HomeReq::Tab(HomeTab::Movies), HomeReq::Tab(HomeTab::Shows), HomeReq::Tab(HomeTab::Search)];
-    let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(EntryId(1)) };
+    let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(), owner: InputOwner::Entry(EntryId(1)), nav_parked_page: false };
     let mut out = Vec::new();
     let mut present = Present::new();
     let mut fx = Effects::new(&mut out, source, &mut present);
@@ -548,7 +548,7 @@ fn home_worker_results_cross_the_addressed_dispatcher_ingest_once() {
     rig.stores.hubs.queue_test_landing(Some(9));
     let result = rig.stores.hubs.take_results().pop().unwrap();
     let parts = CxParts { tick: tick(2), press: Default::default(), focus: Default::default(),
-        owner: plx_machine::machine::InputOwner::Entry(EntryId(0)) };
+        owner: plx_machine::machine::InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut out = Vec::new();
     let mut present = plx_machine::present::Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Nav, &mut present);
@@ -630,7 +630,7 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
     assert_eq!(rig.stores.gen(StoreId::Hubs), before);
 
     let parts = CxParts { tick: tick(2), press: Default::default(), focus: Default::default(),
-        owner: plx_machine::machine::InputOwner::Entry(EntryId(0)) };
+        owner: plx_machine::machine::InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut out = Vec::new();
     let mut present = plx_machine::present::Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Nav, &mut present);
@@ -686,7 +686,7 @@ fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     });
     assert!(rig.browse_directory().sources().is_empty());
     let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
-        owner: InputOwner::Entry(EntryId(0)) };
+        owner: InputOwner::Entry(EntryId(0)), nav_parked_page: false };
     let mut present = Present::new();
     let mut effects = Vec::new();
     let mut fx = Effects::new(

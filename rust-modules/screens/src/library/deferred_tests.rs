@@ -91,6 +91,7 @@ impl Fixture {
             focus: Default::default(),
             press: Default::default(),
             owner: InputOwner::Entry(EntryId(81)),
+            nav_parked_page: false,
         }
     }
     fn screen(&self) -> LibraryScreen {

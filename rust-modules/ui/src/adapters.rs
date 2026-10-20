@@ -86,6 +86,7 @@ mod tests {
             press: Default::default(),
             focus: Default::default(),
             owner: plx_machine::machine::InputOwner::Entry(plx_machine::machine::EntryId(0)),
+            nav_parked_page: false,
         };
         let mut present = plx_machine::present::Present::new();
         let mut buf = Vec::new();

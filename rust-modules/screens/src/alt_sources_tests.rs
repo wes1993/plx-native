@@ -866,6 +866,7 @@ mod focus_and_hit {
             focus: FocusRead { current: focus, ..Default::default() },
             press: PressRead::default(),
             owner: InputOwner::Entry(EntryId(5)),
+            nav_parked_page: false,
         }
     }
     fn key_event(key: Key, edge: Edge) -> ScreenEvent<HostFixture> {

@@ -549,6 +549,7 @@ mod tests {
             tick: Tick::default(), measure: &plx_ui::fixture::FixtureMeasure,
             press: Default::default(), focus: Default::default(),
             owner: InputOwner::Entry(EntryId(0)),
+            nav_parked_page: false,
         };
         let mut out = Vec::new();
         let mut present = plx_machine::present::Present::new();

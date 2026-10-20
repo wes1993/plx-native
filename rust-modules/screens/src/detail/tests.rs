@@ -87,6 +87,7 @@ fn cx<'a>(measure: &'a dyn plx_machine::machine::Measure, elem: Option<u32>) -> 
             }),
         ..Default::default() },
         owner: plx_machine::machine::InputOwner::Entry(EntryId(7)),
+        nav_parked_page: false,
     }
 }
 

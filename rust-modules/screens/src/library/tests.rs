@@ -1128,7 +1128,7 @@ impl Fixture {
     pub(super) fn cx(&self, focus: Option<FocusKey<u32>>) -> Cx<'_, HostFixture> {
         Cx { views: Views { listing: self.listing.view(), directory: self.directory.view(), hubs: self.hubs.view() },
             tick: Tick::default(), measure: &self.measure, focus: FocusRead { current: focus , ..Default::default() },
-            press: PressRead::default(), owner: OWNER }
+            press: PressRead::default(), owner: OWNER, nav_parked_page: false }
     }
     pub(super) fn screen(&self) -> LibraryScreen {
         let mut page = LibraryScreen::new(ENTRY, InstanceId(19), SecKind::Movie);

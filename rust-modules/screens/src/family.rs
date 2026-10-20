@@ -224,6 +224,7 @@ pub fn inner_cx<'o, 'a: 'o, H: DirectoryLike>(cx: &Cx<'a, H>) -> Cx<'o, InnerHos
         press: cx.press,
         focus: cx.focus.clone(),
         owner: cx.owner,
+        nav_parked_page: cx.nav_parked_page,
     }
 }
 

@@ -281,6 +281,7 @@ pub struct CxParts<K> {
     pub press: PressRead<K>,
     pub focus: FocusRead<K>,
     pub owner: InputOwner,
+    pub nav_parked_page: bool,
 }
 
 impl<K: Copy> CxParts<K> {
@@ -292,6 +293,7 @@ impl<K: Copy> CxParts<K> {
             press: self.press,
             focus: self.focus.clone(),
             owner: self.owner,
+            nav_parked_page: self.nav_parked_page,
         }
     }
 }
@@ -751,6 +753,7 @@ where
             },
             focus: self.input.engine.read(owner),
             owner,
+            nav_parked_page: self.has_pending_navigation(),
         }
     }
 

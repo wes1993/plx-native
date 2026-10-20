@@ -220,7 +220,7 @@ fn owned_search_external_departure_never_submits_the_draft() {
     rig.search_run(plx_data::stores::search::SearchCmd::SetQuery("unfinished draft".into()));
     rig.search = rig.stores.search_snapshot(rig.directory.view());
     let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
-        owner: InputOwner::Entry(EntryId(1)) };
+        owner: InputOwner::Entry(EntryId(1)), nav_parked_page: false };
     let split = rig.split();
     let cx = parts.cx::<AppHost>(split.views, split.measure);
     for event in [ScreenEvent::Suspend, ScreenEvent::Cover, ScreenEvent::Unmount,
@@ -249,7 +249,7 @@ fn owned_search_ticks_request_search_work_once_after_step() {
     let _serial = plx_base::testlock::serial();
     let mut rig = Bridge::for_test(|| 0);
     let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
-        owner: InputOwner::Entry(EntryId(1)) };
+        owner: InputOwner::Entry(EntryId(1)), nav_parked_page: false };
     let split = rig.split();
     let cx = parts.cx::<AppHost>(split.views, split.measure);
     let mut screen = plx_screens::search::SearchScreen::new(EntryId(1), InstanceId(1));
@@ -285,7 +285,7 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
     let field = d.focus().unwrap();
     let field_y = |d: &Dispatcher<AppHost>, rig: &Bridge| {
         let parts = CxParts { tick: tick(0), press: Default::default(),
-            focus: d.input.engine.read(InputOwner::Entry(field.entry)), owner: InputOwner::Entry(field.entry) };
+            focus: d.input.engine.read(InputOwner::Entry(field.entry)), owner: InputOwner::Entry(field.entry), nav_parked_page: false };
         let cx = parts.cx::<AppHost>(rig.views_with(plx_media::route::idle_session_for_test()), &rig.measure);
         d.top_screen().unwrap().place(&field.elem, &cx, At::Drawn).unwrap().rest_rect.y
     };
@@ -297,7 +297,7 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
     assert!(field_y(&d, &rig) < before - 10.0, "wheel motion persists after the next Tick");
     {
         let parts = CxParts { tick: tick(79), press: Default::default(), focus: Default::default(),
-            owner: InputOwner::Entry(field.entry) };
+            owner: InputOwner::Entry(field.entry), nav_parked_page: false };
         let split = rig.split();
         let cx = parts.cx::<AppHost>(split.views, split.measure);
         let placed = d.top_screen().unwrap().place(&field.elem, &cx, At::Drawn).unwrap();
@@ -625,7 +625,7 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
     let page = d.nav.entry(entry).unwrap().inst.as_ref().unwrap().screen.as_any().unwrap()
         .downcast_ref::<plx_screens::search::SearchScreen>().unwrap();
     let parts = CxParts { tick: Tick::default(), press: Default::default(),
-        focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() }, owner: InputOwner::Entry(entry) };
+        focus: plx_machine::machine::FocusRead { current: ret.focus, ..Default::default() }, owner: InputOwner::Entry(entry), nav_parked_page: false };
     let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
     let placed = page.place(&ret.focus.unwrap().elem, &cx, At::Drawn).unwrap();
     assert_eq!(opener.rect, Some(placed.rest_rect), "the anchor is the settled rect `place` answers, as the downcast path read it");
@@ -685,7 +685,7 @@ fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
     let ret = d.return_state();
     let key = ret.focus.unwrap();
     let memory = match &ret.memory { PageMemory::Search(memory) => memory, _ => panic!("Search must supply entry memory") };
-    let parts = CxParts { tick: tick(100), press: Default::default(), focus: d.input.engine.read(InputOwner::Entry(key.entry)), owner: InputOwner::Entry(key.entry) };
+    let parts = CxParts { tick: tick(100), press: Default::default(), focus: d.input.engine.read(InputOwner::Entry(key.entry)), owner: InputOwner::Entry(key.entry), nav_parked_page: false };
     let old_rect = {
         let cx = parts.cx::<AppHost>(rig.views_with(plx_media::route::idle_session_for_test()), &rig.measure);
         d.top_screen().unwrap().place(&key.elem, &cx, At::Drawn).unwrap().rest_rect

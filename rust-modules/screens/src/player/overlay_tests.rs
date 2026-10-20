@@ -77,6 +77,7 @@ fn cx() -> Cx<'static, TestHost> {
         focus: Default::default(),
         press: Default::default(),
         owner: InputOwner::Entry(ENTRY),
+        nav_parked_page: false,
     }
 }
 
