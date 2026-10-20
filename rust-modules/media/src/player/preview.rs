@@ -775,6 +775,12 @@ pub fn after_pump(
         }
         Settle::Refused => {
             transition("landing refused", Machine::refuse_landing);
+            // The landing's MDE registered the preview's own session before it refused, and a
+            // refused landing never gets an engine — so nothing else will ever release it. A share
+            // that allows ONE playback at a time counts that session too, and the app would lock
+            // itself out one preview at a time. `scrobble_stop`'s preview branch posts nothing and
+            // closes the session it took.
+            crate::route::scrobble_stop(ps, None, None);
             crate::route::clear_preview(ps);
         }
     }

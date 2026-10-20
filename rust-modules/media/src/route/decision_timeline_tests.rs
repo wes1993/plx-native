@@ -580,6 +580,95 @@ fn a_preview_stop_releases_the_stream_it_took_and_posts_no_watch_state() {
     reset_player_control_for_test(&ps);
 }
 
+/// **The MDE's own session is released too.** `/video/:/transcode/universal/decision` registers a
+/// session under the logical id, and a transcode then runs under a DERIVED id (`<logical>-abr-N`).
+/// The stop releases the derived one; the logical one is a separate server-side session and a share
+/// that allows ONE playback at a time counts it — so the app locked itself out after a few plays
+/// (measured on a real share: every MDE answered "Hai troppi stream attivi" while the exit reported
+/// `resource_closed=1`).
+#[test]
+fn a_stop_releases_the_mdes_own_session_as_well_as_the_encoders() {
+    let mut ps = crate::route::PlaybackSession::IDLE;
+    use std::time::Duration;
+    let _g = fresh_registry(&mut ps);
+    drain_scrobble();
+    reset_session(&mut ps);
+    reset_player_control_for_test(&ps);
+
+    // Four connections, in the worker's own order: the `stopped` timeline (200), the encoder stop
+    // (404, so the reconcile is attempted), the encoder's resource close, and the logical close —
+    // the last of which is what this test is about.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port() as i32;
+    let (seen_tx, seen_rx) = std::sync::mpsc::channel::<String>();
+    let server = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader, Write};
+        for answer in ["200 OK", "404 Not Found", "200 OK", "200 OK"] {
+            let Some(Ok(mut socket)) = listener.incoming().next() else { return };
+            let mut line = String::new();
+            let _ = BufReader::new(&socket).read_line(&mut line);
+            let _ = socket.write_all(
+                format!("HTTP/1.1 {answer}\r\nContent-Length: 0\r\n\r\n").as_bytes(),
+            );
+            if seen_tx.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let sid = plx_plex::plex::register_for_test(
+        "mde-release",
+        "127.0.0.1",
+        port,
+        "mde-token",
+        "mde-client",
+    );
+
+    apply_plan(
+        &mut ps,
+        Plan {
+            sid,
+            url: "https://example.invalid/film.mkv".into(),
+            sess: "logical-play".into(),
+            tsession: "logical-play-abr-1".into(),
+            ..Default::default()
+        },
+        "film",
+    );
+    scrobble_stop(&mut ps, Some(("film".into(), 1_000, 20_000)), None);
+    drain_scrobble();
+
+    let mut lines = Vec::new();
+    for _ in 0..4 {
+        lines.push(
+            seen_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the stop worker did not reach the server"),
+        );
+    }
+    assert!(
+        lines.iter().any(|l| l.contains("/:/timeline") && l.contains("state=stopped")),
+        "the stop never reported its position: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("/video/:/transcode/universal/stop")),
+        "the encoder was never stopped: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("X-Plex-Session-Identifier=logical-play-abr-1")),
+        "the encoder's session was never closed: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("X-Plex-Session-Identifier=logical-play&")),
+        "the MDE's own session was never closed: {lines:?}"
+    );
+
+    server.join().unwrap();
+    plx_plex::plex::reset_servers_for_test();
+    reset_session(&mut ps);
+    install_active_encoder("");
+    reset_player_control_for_test(&ps);
+}
+
 /// **A film pressed after a trailer is a film from the press on.** `resolved_as_preview` is fixed
 /// at a landing, so a film whose resolve never lands (a refused worker spawn, a superseded
 /// request) left the PREVIOUS trailer's flag standing: the failure read-out of the film was then

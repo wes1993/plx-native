@@ -5694,6 +5694,10 @@ struct ScrobbleWork {
     audio_stream_id: i64,
     subtitle_stream_id: i64,
     transcode_session: String,
+    /// The session the Media Decision Engine registered, under the LOGICAL id. A transcode then
+    /// runs under a DERIVED id (`<logical>-abr-N`), so the two are separate server-side sessions and
+    /// this one is released separately. See `run`.
+    logical_session: String,
     /// This stop belongs to a hero preview: it releases the stream and posts nothing, and the log
     /// line says which kind of stop it was.
     preview: bool,
@@ -5853,6 +5857,24 @@ impl ScrobbleWork {
                 closed as i32
             ));
         }
+        // **The MDE registered a session of its own.** `/video/:/transcode/universal/decision`
+        // ("Registers the session as a side effect") takes the LOGICAL id, and a transcode then
+        // runs under a DERIVED one (`<logical>-abr-N`); the stop above releases the derived session
+        // and leaves the logical one standing. A share that allows ONE playback at a time counts
+        // both, so the app locked itself out: measured on a real share, after a few plays every MDE
+        // answered "Hai troppi stream attivi" while the exit reported `resource_closed=1`. Closing
+        // the logical id too is idempotent (a direct play, where the two are the same, is skipped).
+        if !self.logical_session.is_empty() && self.logical_session != self.transcode_session {
+            let closed = self
+                .client
+                .and_then(|c| c.transcode_resource_reconciled(&self.logical_session))
+                == Some(true);
+            plx_base::eventlog::log(&format!(
+                "{}mde session closed={}",
+                if self.preview { "preview: " } else { "" },
+                closed as i32
+            ));
+        }
     }
 }
 
@@ -5901,7 +5923,7 @@ pub fn scrobble_stop(
         tsession = logical_session.clone();
     }
     let session = if tsession.is_empty() {
-        logical_session
+        logical_session.clone()
     } else {
         tsession.clone()
     };
@@ -5952,6 +5974,7 @@ pub fn scrobble_stop(
         audio_stream_id: aud,
         subtitle_stream_id: sub,
         transcode_session: tsession,
+        logical_session,
         preview: is_preview,
         timeline_stop,
         stop_mail,
